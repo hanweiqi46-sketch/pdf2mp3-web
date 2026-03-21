@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-PDF → MP3 Web 应用
-依赖: pip3 install flask pdfplumber edge-tts
-运行: python3 app.py
-部署: Railway / Render / 任何支持 Python 的平台
+PDF → MP3 Web 应用（修复版）
+修复：超时保护 / 分段合成 / 逐页进度日志 / 自动重试
 """
 
-import asyncio, os, re, threading, uuid, time
+import asyncio, os, re, threading, uuid, time, tempfile
 from pathlib import Path
 from flask import Flask, request, jsonify, send_file, render_template
 
@@ -17,8 +15,7 @@ OUTPUT_DIR = Path("outputs")
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# 任务状态存储（生产环境可换成 Redis）
-tasks = {}   # task_id -> {logs, done, success, mp3_path}
+tasks = {}  # task_id -> {logs, done, success, mp3_path}
 
 # ═══════════════════════════════════════════════════════════════
 #  文本处理
@@ -99,15 +96,17 @@ def extract_text_from_pdf(pdf_path, start_page, end_page, log_fn):
     all_parts = []
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
-        log_fn(f"   PDF 共 {total} 页")
+        log_fn(f"   PDF 共 {total} 页，开始提取文字…")
         end = min(end_page, total)
+        page_count = end - start_page + 1
         for i, idx in enumerate(range(start_page - 1, end)):
             raw = pdf.pages[idx].extract_text()
             if raw:
                 cleaned = process_page_text(raw)
-                if cleaned: all_parts.append(cleaned)
-            if (i + 1) % 10 == 0:
-                log_fn(f"   已处理 {i+1}/{end - start_page + 1} 页")
+                if cleaned:
+                    all_parts.append(cleaned)
+            # 每页都记录进度
+            log_fn(f"   第 {start_page + i} 页提取完成 ({i+1}/{page_count})")
     if not all_parts:
         return None
     text = post_process('\n\n'.join(all_parts))
@@ -115,15 +114,86 @@ def extract_text_from_pdf(pdf_path, start_page, end_page, log_fn):
     log_fn(f"✅ 文本提取完成：{len(text)} 字符，中文 {cn} 字")
     return text
 
-async def _run_tts(text, voice, rate, output_path):
+# ═══════════════════════════════════════════════════════════════
+#  TTS：分段合成 + 超时保护 + 自动重试
+# ═══════════════════════════════════════════════════════════════
+
+CHUNK_SIZE = 800  # 每段最大字符数
+
+def split_text_into_chunks(text, max_chars=CHUNK_SIZE):
+    """按句末标点切分，每段不超过 max_chars"""
+    sentences = re.split(r'(?<=[。！？\.\!\?])', text)
+    chunks = []
+    current = ""
+    for s in sentences:
+        if not s.strip():
+            continue
+        if len(current) + len(s) <= max_chars:
+            current += s
+        else:
+            if current:
+                chunks.append(current.strip())
+            while len(s) > max_chars:
+                chunks.append(s[:max_chars])
+                s = s[max_chars:]
+            current = s
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks
+
+async def _tts_one_chunk(text, voice, rate, output_path, timeout=90):
     import edge_tts
-    communicate = edge_tts.Communicate(merge_lines_for_tts(text), voice, rate=rate)
-    await communicate.save(output_path)
+    communicate = edge_tts.Communicate(text, voice, rate=rate)
+    await asyncio.wait_for(communicate.save(output_path), timeout=timeout)
+
+async def _tts_all_chunks(chunks, voice, rate, tmp_dir, log_fn):
+    paths = []
+    for i, chunk in enumerate(chunks):
+        out = os.path.join(tmp_dir, f"chunk_{i:04d}.mp3")
+        success = False
+        for attempt in range(2):
+            try:
+                log_fn(f"   🔊 合成第 {i+1}/{len(chunks)} 段…")
+                await _tts_one_chunk(chunk, voice, rate, out, timeout=90)
+                paths.append(out)
+                success = True
+                break
+            except asyncio.TimeoutError:
+                if attempt == 0:
+                    log_fn(f"   ⚠️ 第 {i+1} 段超时，2秒后重试…")
+                    await asyncio.sleep(2)
+                else:
+                    log_fn(f"   ❌ 第 {i+1} 段超时失败，已跳过")
+            except Exception as e:
+                if attempt == 0:
+                    log_fn(f"   ⚠️ 第 {i+1} 段出错（{e}），3秒后重试…")
+                    await asyncio.sleep(3)
+                else:
+                    log_fn(f"   ❌ 第 {i+1} 段失败（{e}），已跳过")
+    return paths
+
+def merge_mp3_files(chunk_paths, output_path):
+    """直接拼接 mp3 二进制，无需 ffmpeg"""
+    with open(output_path, 'wb') as out:
+        for p in chunk_paths:
+            with open(p, 'rb') as f:
+                out.write(f.read())
 
 def generate_mp3(text, voice, rate, output_path, log_fn):
     log_fn(f"🎙 声音：{voice}  语速：{rate}")
-    log_fn("⏳ 正在生成语音，约 1–3 分钟…")
-    asyncio.run(_run_tts(text, voice, rate, output_path))
+    tts_text = merge_lines_for_tts(text)
+    chunks = split_text_into_chunks(tts_text)
+    log_fn(f"📝 文本已分为 {len(chunks)} 段，开始逐段合成…")
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        chunk_paths = asyncio.run(
+            _tts_all_chunks(chunks, voice, rate, tmp_dir, log_fn)
+        )
+        if not chunk_paths:
+            raise RuntimeError("所有段均合成失败，请检查网络连接或更换语音")
+        log_fn(f"🔗 正在合并 {len(chunk_paths)} 段音频…")
+        merge_mp3_files(chunk_paths, output_path)
+
     size_mb = os.path.getsize(output_path) / 1024 / 1024
     log_fn(f"✅ MP3 完成，大小：{size_mb:.1f} MB")
     return True
@@ -141,7 +211,7 @@ def run_task(task_id, pdf_path, start, end, voice, rate):
     try:
         text = extract_text_from_pdf(pdf_path, start, end, log)
         if not text:
-            log("❌ 未提取到内容，请检查页码范围")
+            log("❌ 未提取到中文内容，请检查页码范围或 PDF 是否为扫描版（图片）")
             task["done"] = True
             return
 
@@ -158,7 +228,6 @@ def run_task(task_id, pdf_path, start, end, voice, rate):
 
     finally:
         task["done"] = True
-        # 清理上传的 PDF
         try: os.remove(pdf_path)
         except: pass
 
@@ -172,7 +241,6 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    """接收 PDF 上传，启动处理任务"""
     if "pdf" not in request.files:
         return jsonify({"error": "没有收到文件"}), 400
 
@@ -191,12 +259,10 @@ def upload():
     if start < 1 or end < start:
         return jsonify({"error": "页码范围无效"}), 400
 
-    # 保存 PDF
     task_id  = uuid.uuid4().hex
     pdf_path = str(UPLOAD_DIR / f"{task_id}.pdf")
     f.save(pdf_path)
 
-    # 注册任务
     tasks[task_id] = {
         "logs": [], "done": False,
         "success": False, "mp3_path": None
@@ -212,7 +278,6 @@ def upload():
 
 @app.route("/status/<task_id>")
 def status(task_id):
-    """轮询任务状态和日志"""
     task = tasks.get(task_id)
     if not task:
         return jsonify({"error": "任务不存在"}), 404
@@ -226,7 +291,6 @@ def status(task_id):
 
 @app.route("/download/<task_id>")
 def download(task_id):
-    """下载生成的 MP3"""
     task = tasks.get(task_id)
     if not task or not task.get("mp3_path"):
         return "文件不存在", 404
@@ -241,8 +305,6 @@ def download(task_id):
         download_name="output.mp3",
         mimetype="audio/mpeg"
     )
-
-# ═══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     print("🚀 启动服务：http://127.0.0.1:5000")
