@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF → MP3 转换器</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --green:    #2D6A4F;
+  --green-m:  #40916C;
+  --green-l:  #74C69D;
+  --green-xl: #D8F3DC;
+  --bg:       #EFF6F1;
+  --card:     #FFFFFF;
+  --ink:      #1A1A18;
+  --ink2:     #6A6760;
+  --border:   #DEE8E2;
+  --red:      #D94F4F;
+  --shadow:   0 2px 16px rgba(45,106,79,0.10);
+}
+
+body {
+  font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", sans-serif;
+  background: var(--bg);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 16px 60px;
+  color: var(--ink);
+}
+
+/* ── 顶部 ── */
+.hero {
+  width: 100%;
+  max-width: 600px;
+  text-align: center;
+  margin-bottom: 32px;
+}
+.hero-icon {
+  width: 64px; height: 64px;
+  background: var(--green);
+  border-radius: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 28px;
+  margin-bottom: 16px;
+  box-shadow: 0 6px 20px rgba(45,106,79,0.30);
+}
+.hero h1 {
+  font-size: 28px; font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--green);
+}
+.hero p {
+  margin-top: 8px;
+  font-size: 14px; color: var(--ink2);
+  line-height: 1.6;
+}
+
+/* ── 卡片 ── */
+.card {
+  width: 100%;
+  max-width: 600px;
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.card-header {
+  padding: 16px 24px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.card-header .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--green-l);
+}
+.card-header span {
+  font-size: 12px; font-weight: 700;
+  color: var(--green);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.card-body { padding: 22px 24px; }
+
+/* ── 拖拽上传区 ── */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 36px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #FAFCFB;
+  position: relative;
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--green);
+  background: var(--green-xl);
+}
+.drop-zone input[type=file] {
+  position: absolute; inset: 0;
+  opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+.drop-icon { font-size: 36px; margin-bottom: 10px; }
+.drop-title { font-size: 15px; font-weight: 600; color: var(--ink); }
+.drop-sub   { font-size: 12px; color: var(--ink2); margin-top: 4px; }
+
+.file-info {
+  display: none;
+  align-items: center; gap: 12px;
+  padding: 12px 16px;
+  background: var(--green-xl);
+  border-radius: 10px;
+  margin-top: 12px;
+}
+.file-info.show { display: flex; }
+.file-info-icon { font-size: 24px; }
+.file-info-text { flex: 1; }
+.file-info-name { font-size: 13px; font-weight: 600; color: var(--green); }
+.file-info-size { font-size: 11px; color: var(--ink2); margin-top: 2px; }
+.file-clear {
+  background: none; border: none;
+  font-size: 18px; cursor: pointer; color: var(--ink2);
+  padding: 4px; line-height: 1;
+}
+.file-clear:hover { color: var(--red); }
+
+/* ── 表单字段 ── */
+.field { margin-bottom: 18px; }
+.field:last-child { margin-bottom: 0; }
+.field > label {
+  display: block;
+  font-size: 13px; font-weight: 600;
+  color: var(--ink2);
+  margin-bottom: 8px;
+}
+
+.page-row {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+}
+.page-row span { font-size: 14px; color: var(--ink); }
+.page-input {
+  width: 80px;
+  padding: 9px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px; text-align: center;
+  color: var(--ink); background: white;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.page-input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(45,106,79,0.12);
+}
+
+/* ── 单选选项 ── */
+.radio-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.radio-option {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 13px; color: var(--ink);
+  background: white;
+}
+.radio-option:hover { border-color: var(--green-l); background: var(--green-xl); }
+.radio-option input { accent-color: var(--green); width: 15px; height: 15px; cursor: pointer; }
+.radio-option.selected {
+  border-color: var(--green);
+  background: var(--green-xl);
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* ── 提交按钮 ── */
+.submit-btn {
+  width: 100%; padding: 14px;
+  background: var(--green);
+  color: white; border: none;
+  border-radius: 12px;
+  font-size: 16px; font-weight: 700;
+  cursor: pointer; letter-spacing: 0.02em;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  box-shadow: 0 4px 12px rgba(45,106,79,0.25);
+}
+.submit-btn:hover { background: var(--green-m); box-shadow: 0 6px 16px rgba(45,106,79,0.30); }
+.submit-btn:active { transform: scale(0.99); }
+.submit-btn:disabled { background: #AAAAAA; cursor: not-allowed; box-shadow: none; }
+
+/* ── 进度卡片 ── */
+#resultCard { display: none; }
+#resultCard.show { display: block; }
+
+.progress-track {
+  height: 6px; background: var(--border);
+  border-radius: 3px; overflow: hidden;
+  margin-bottom: 16px;
+}
+.progress-fill {
+  height: 100%; width: 0%; background: var(--green);
+  border-radius: 3px; transition: width 0.3s;
+}
+.progress-fill.running {
+  width: 35%;
+  animation: slide 1.4s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { margin-left: -35%; width: 35%; }
+  100% { margin-left: 100%; width: 35%; }
+}
+
+.status-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--border); flex-shrink: 0;
+}
+.status-dot.running { background: var(--green); animation: pulse 1s infinite; }
+.status-dot.done    { background: var(--green); }
+.status-dot.error   { background: var(--red); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.status-text { font-size: 14px; font-weight: 600; color: var(--ink); }
+
+.log-area {
+  background: #111814;
+  border-radius: 10px;
+  padding: 16px;
+  height: 180px;
+  overflow-y: auto;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 12px; line-height: 1.8;
+  color: #7EC8A0;
+  margin-bottom: 16px;
+}
+.log-area::-webkit-scrollbar { width: 5px; }
+.log-area::-webkit-scrollbar-track { background: #1A2018; }
+.log-area::-webkit-scrollbar-thumb { background: #2E4830; border-radius: 3px; }
+
+/* ── 下载按钮 ── */
+.download-btn {
+  display: none;
+  width: 100%; padding: 14px;
+  background: white;
+  color: var(--green); border: 2px solid var(--green);
+  border-radius: 12px;
+  font-size: 15px; font-weight: 700;
+  cursor: pointer; text-align: center;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.download-btn:hover { background: var(--green-xl); }
+.download-btn.show { display: block; }
+
+/* ── 页脚 ── */
+footer {
+  margin-top: 32px;
+  font-size: 12px; color: var(--ink2);
+  text-align: center; line-height: 2;
+}
+footer a { color: var(--green); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<!-- 顶部 Hero -->
+<div class="hero">
+  <div class="hero-icon">📖</div>
+  <h1>PDF → MP3 转换器</h1>
+  <p>上传中文 PDF · 自动过滤英文段落 · 生成真人朗读语音</p>
+</div>
+
+<!-- 文件上传卡片 -->
+<div class="card">
+  <div class="card-header">
+    <div class="dot"></div>
+    <span>上传 PDF</span>
+  </div>
+  <div class="card-body">
+    <div class="drop-zone" id="dropZone">
+      <input type="file" id="fileInput" accept=".pdf">
+      <div class="drop-icon">📄</div>
+      <div class="drop-title">点击选择或拖拽 PDF 文件到此处</div>
+      <div class="drop-sub">支持中英文混排 PDF，最大 50 MB</div>
+    </div>
+    <div class="file-info" id="fileInfo">
+      <div class="file-info-icon">📑</div>
+      <div class="file-info-text">
+        <div class="file-info-name" id="fileName">—</div>
+        <div class="file-info-size" id="fileSize">—</div>
+      </div>
+      <button class="file-clear" onclick="clearFile()" title="重新选择">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置卡片 -->
+<div class="card">
+  <div class="card-header">
+    <div class="dot"></div>
+    <span>转换设置</span>
+  </div>
+  <div class="card-body">
+
+    <div class="field">
+      <label>页码范围</label>
+      <div class="page-row">
+        <span>从第</span>
+        <input class="page-input" type="number" id="startPage" value="1" min="1">
+        <span>页 &nbsp;到第</span>
+        <input class="page-input" type="number" id="endPage" value="50" min="1">
+        <span>页</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>朗读声音</label>
+      <div class="radio-grid" id="voiceGroup">
+        <label class="radio-option selected">
+          <input type="radio" name="voice" value="zh-CN-XiaoxiaoNeural" checked> 晓晓（女·温柔自然）
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="voice" value="zh-CN-YunxiNeural"> 云希（男·自然流畅）
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="voice" value="zh-CN-XiaoyiNeural"> 晓伊（女·活泼明快）
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="voice" value="zh-CN-YunjianNeural"> 云健（男·沉稳有力）
+        </label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>朗读语速</label>
+      <div class="radio-grid" id="rateGroup">
+        <label class="radio-option">
+          <input type="radio" name="rate" value="-20%"> 慢速 −20%
+        </label>
+        <label class="radio-option selected">
+          <input type="radio" name="rate" value="+0%" checked> 正常 ±0%
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="rate" value="+15%"> 较快 +15%
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="rate" value="+30%"> 快速 +30%
+        </label>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 开始按钮 -->
+<div style="width:100%;max-width:600px;margin-bottom:16px;">
+  <button class="submit-btn" id="startBtn" onclick="startConvert()">
+    ▶&nbsp;&nbsp;开始转换
+  </button>
+</div>
+
+<!-- 进度 & 结果卡片 -->
+<div class="card" id="resultCard">
+  <div class="card-header">
+    <div class="dot"></div>
+    <span>处理进度</span>
+  </div>
+  <div class="card-body">
+    <div class="status-row">
+      <div class="status-dot" id="statusDot"></div>
+      <div class="status-text" id="statusText">准备中…</div>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="log-area" id="logArea"></div>
+    <a class="download-btn" id="downloadBtn" href="#" download="output.mp3">
+      ⬇️&nbsp;&nbsp;下载 MP3
+    </a>
+  </div>
+</div>
+
+<footer>
+  使用 <a href="https://github.com/rany2/edge-tts">edge-tts</a> 生成语音 ·
+  数据仅用于转换，不做存储
+</footer>
+
+<script>
+let currentFile = null;
+let currentTaskId = null;
+let pollInterval = null;
+let logCount = 0;
+
+// ── 文件选择 ──────────────────────────────────────────────────
+
+document.getElementById('fileInput').addEventListener('change', e => {
+  handleFile(e.target.files[0]);
+});
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  handleFile(e.dataTransfer.files[0]);
+});
+
+function handleFile(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    alert('请选择 PDF 文件！'); return;
+  }
+  currentFile = file;
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileSize').textContent = formatSize(file.size);
+  document.getElementById('fileInfo').classList.add('show');
+}
+
+function clearFile() {
+  currentFile = null;
+  document.getElementById('fileInput').value = '';
+  document.getElementById('fileInfo').classList.remove('show');
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+// ── 单选高亮 ─────────────────────────────────────────────────
+
+document.querySelectorAll('.radio-option input').forEach(radio => {
+  radio.addEventListener('change', () => {
+    const group = radio.closest('.radio-grid');
+    group.querySelectorAll('.radio-option').forEach(o => o.classList.remove('selected'));
+    radio.closest('.radio-option').classList.add('selected');
+  });
+});
+
+// ── 开始转换 ─────────────────────────────────────────────────
+
+async function startConvert() {
+  if (!currentFile) { alert('请先选择 PDF 文件！'); return; }
+
+  const start = parseInt(document.getElementById('startPage').value);
+  const end   = parseInt(document.getElementById('endPage').value);
+  if (isNaN(start) || isNaN(end) || start < 1 || end < start) {
+    alert('页码范围无效！请检查起止页码。'); return;
+  }
+
+  const voice = document.querySelector('input[name=voice]:checked').value;
+  const rate  = document.querySelector('input[name=rate]:checked').value;
+
+  // 重置 UI
+  logCount = 0;
+  document.getElementById('logArea').textContent = '';
+  document.getElementById('downloadBtn').classList.remove('show');
+  document.getElementById('resultCard').classList.add('show');
+  document.getElementById('startBtn').disabled = true;
+  setStatus('上传文件…', 'running');
+
+  // 上传
+  const fd = new FormData();
+  fd.append('pdf', currentFile);
+  fd.append('start', start);
+  fd.append('end', end);
+  fd.append('voice', voice);
+  fd.append('rate', rate);
+
+  let res;
+  try {
+    res = await fetch('/upload', { method: 'POST', body: fd });
+  } catch (e) {
+    setStatus('网络错误', 'error');
+    document.getElementById('startBtn').disabled = false;
+    return;
+  }
+
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    setStatus('❌ ' + (data.error || '上传失败'), 'error');
+    document.getElementById('startBtn').disabled = false;
+    return;
+  }
+
+  currentTaskId = data.task_id;
+  setStatus('处理中…', 'running');
+  pollInterval = setInterval(pollStatus, 600);
+}
+
+// ── 轮询状态 ─────────────────────────────────────────────────
+
+async function pollStatus() {
+  if (!currentTaskId) return;
+  try {
+    const res  = await fetch(`/status/${currentTaskId}?from=${logCount}`);
+    const data = await res.json();
+
+    // 追加日志
+    const logEl = document.getElementById('logArea');
+    for (const line of data.lines) {
+      logEl.textContent += line + '\n';
+    }
+    logEl.scrollTop = logEl.scrollHeight;
+    logCount += data.lines.length;
+
+    if (data.done) {
+      clearInterval(pollInterval);
+      document.getElementById('startBtn').disabled = false;
+
+      if (data.success) {
+        setStatus('✅ 转换完成！', 'done');
+        const btn = document.getElementById('downloadBtn');
+        btn.href = `/download/${currentTaskId}`;
+        btn.classList.add('show');
+      } else {
+        setStatus('❌ 转换失败，请查看日志', 'error');
+      }
+    }
+  } catch(e) {
+    // 忽略轮询的网络错误
+  }
+}
+
+// ── 状态 UI ──────────────────────────────────────────────────
+
+function setStatus(text, state) {
+  document.getElementById('statusText').textContent = text;
+  const dot  = document.getElementById('statusDot');
+  const fill = document.getElementById('progressFill');
+  dot.className = 'status-dot ' + state;
+
+  if (state === 'running') {
+    fill.className = 'progress-fill running';
+    fill.style.width = '';
+  } else if (state === 'done') {
+    fill.className = 'progress-fill';
+    fill.style.width = '100%';
+    fill.style.background = 'var(--green)';
+  } else if (state === 'error') {
+    fill.className = 'progress-fill';
+    fill.style.width = '100%';
+    fill.style.background = 'var(--red)';
+  }
+}
+</script>
+</body>
+</html>
