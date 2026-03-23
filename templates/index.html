@@ -518,7 +518,7 @@ async function pollStatus() {
       logEl.textContent += line + '\n';
     }
     logEl.scrollTop = logEl.scrollHeight;
-    logCount += data.lines.length;
+    logCount += data.logs.length;
 
     if (data.done) {
       clearInterval(pollInterval);
