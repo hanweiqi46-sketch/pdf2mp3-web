@@ -514,7 +514,7 @@ async function pollStatus() {
 
     // 追加日志
     const logEl = document.getElementById('logArea');
-    for (const line of data.lines) {
+    for (const line of data.logs) {
       logEl.textContent += line + '\n';
     }
     logEl.scrollTop = logEl.scrollHeight;
