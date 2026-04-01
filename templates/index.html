@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PDF → MP3 转换器</title>
+<title>AI 工具箱</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -37,7 +37,7 @@ body {
   width: 100%;
   max-width: 600px;
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 .hero-icon {
   width: 64px; height: 64px;
@@ -59,10 +59,46 @@ body {
   line-height: 1.6;
 }
 
+/* ── 标签页 ── */
+.tabs {
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  background: var(--card);
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: var(--shadow);
+}
+.tab-btn {
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s;
+  background: transparent;
+  color: var(--ink2);
+}
+.tab-btn.active {
+  background: var(--green);
+  color: white;
+  box-shadow: 0 3px 10px rgba(45,106,79,0.25);
+}
+.tab-btn:not(.active):hover {
+  background: var(--green-xl);
+  color: var(--green);
+}
+
+/* ── 面板 ── */
+.panel { display: none; width: 100%; max-width: 600px; }
+.panel.active { display: block; }
+
 /* ── 卡片 ── */
 .card {
   width: 100%;
-  max-width: 600px;
   background: var(--card);
   border-radius: 16px;
   box-shadow: var(--shadow);
@@ -183,7 +219,7 @@ body {
   font-weight: 600;
 }
 
-/* ── 提交按钮 ── */
+/* ── 按钮 ── */
 .submit-btn {
   width: 100%; padding: 14px;
   background: var(--green);
@@ -199,8 +235,8 @@ body {
 .submit-btn:disabled { background: #AAAAAA; cursor: not-allowed; box-shadow: none; }
 
 /* ── 进度卡片 ── */
-#resultCard { display: none; }
-#resultCard.show { display: block; }
+.result-card { display: none; }
+.result-card.show { display: block; }
 
 .progress-track {
   height: 6px; background: var(--border);
@@ -264,6 +300,50 @@ body {
 .download-btn:hover { background: var(--green-xl); }
 .download-btn.show { display: block; }
 
+/* ── 图片画布容器 ── */
+.canvas-wrap {
+  position: relative;
+  display: none;
+  margin-top: 14px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f0f0f0;
+  border: 1.5px solid var(--border);
+  max-height: 480px;
+  overflow-y: auto;
+}
+.canvas-wrap.show { display: block; }
+#imgCanvas {
+  display: block;
+  max-width: 100%;
+  cursor: crosshair;
+  user-select: none;
+}
+
+/* ── 已框选区域标签列表 ── */
+.region-list {
+  margin-top: 10px;
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.region-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px;
+  background: var(--green-xl);
+  border: 1.5px solid var(--green-l);
+  border-radius: 20px;
+  font-size: 12px; color: var(--green); font-weight: 600;
+}
+.region-tag button {
+  background: none; border: none; cursor: pointer;
+  color: var(--ink2); font-size: 13px; line-height: 1; padding: 0;
+}
+.region-tag button:hover { color: var(--red); }
+
+/* ── 画布操作提示 ── */
+.canvas-hint {
+  font-size: 12px; color: var(--ink2); margin-top: 8px; line-height: 1.6;
+}
+
 /* ── 页脚 ── */
 footer {
   margin-top: 32px;
@@ -271,6 +351,121 @@ footer {
   text-align: center; line-height: 2;
 }
 footer a { color: var(--green); text-decoration: none; }
+
+/* ── 视频模式切换 ── */
+.mode-switch {
+  display: flex; gap: 6px;
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 18px;
+}
+.mode-btn {
+  flex: 1; padding: 9px 12px;
+  border: none; border-radius: 8px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; color: var(--ink2);
+  background: transparent;
+  transition: all 0.15s;
+}
+.mode-btn:hover { background: var(--green-xl); color: var(--green); }
+.mode-btn.active { background: var(--green); color: white; box-shadow: 0 2px 8px rgba(45,106,79,0.22); }
+
+/* ── 文本域 ── */
+textarea.link-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  font-family: "Menlo", "Consolas", monospace;
+  color: var(--ink);
+  background: white;
+  resize: vertical;
+  min-height: 140px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  line-height: 1.7;
+}
+textarea.link-input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(45,106,79,0.12);
+}
+textarea.link-input::placeholder { color: #AAAAAA; }
+input.text-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--ink);
+  background: white;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input.text-input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(45,106,79,0.12);
+}
+input.text-input::placeholder { color: #AAAAAA; }
+.field-hint { font-size: 11px; color: var(--ink2); margin-top: 5px; line-height: 1.5; }
+
+/* ── 已选视频列表 ── */
+.video-file-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.video-file-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: var(--green-xl);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.video-file-item .vf-name { flex: 1; font-weight: 600; color: var(--green); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-file-item .vf-size { color: var(--ink2); flex-shrink: 0; }
+.video-file-item .vf-del  { background: none; border: none; cursor: pointer; color: var(--ink2); font-size: 16px; padding: 0 2px; }
+.video-file-item .vf-del:hover { color: var(--red); }
+
+/* ── 视频转录结果列表 ── */
+.video-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.video-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: white;
+  transition: border-color 0.15s;
+}
+.video-item.done    { border-color: var(--green-l); background: var(--green-xl); }
+.video-item.error   { border-color: #F5C6C6; background: #FFF5F5; }
+.video-item.active  { border-color: var(--green); }
+.video-status-icon { font-size: 20px; flex-shrink: 0; width: 24px; text-align: center; }
+.video-info { flex: 1; min-width: 0; }
+.video-title { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.video-sub  { font-size: 11px; color: var(--ink2); margin-top: 2px; }
+.video-dl-btn {
+  padding: 6px 12px;
+  border: 1.5px solid var(--green);
+  background: white; color: var(--green);
+  border-radius: 8px; font-size: 12px; font-weight: 700;
+  cursor: pointer; text-decoration: none; flex-shrink: 0;
+  transition: all 0.15s;
+}
+.video-dl-btn:hover { background: var(--green-xl); }
+
+/* ── 字幕面板字体大小单选 ── */
+.radio-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.radio-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer; font-size: 13px; color: var(--ink);
+  background: white; transition: all 0.15s;
+}
+.radio-item:has(input:checked) {
+  border-color: var(--green); background: var(--green-xl);
+  color: var(--green); font-weight: 600;
+}
+.radio-item input { accent-color: var(--green); }
 </style>
 </head>
 <body>
@@ -278,154 +473,334 @@ footer a { color: var(--green); text-decoration: none; }
 <!-- 顶部 Hero -->
 <div class="hero">
   <div class="hero-icon">📖</div>
-  <h1>PDF → MP3 转换器</h1>
-  <p>上传中文 PDF · 自动过滤英文段落 · 生成真人朗读语音</p>
+  <h1>AI 工具箱</h1>
+  <p>PDF 转语音 · 图片去水印 · 视频转文字 · 视频加字幕</p>
 </div>
 
-<!-- 文件上传卡片 -->
-<div class="card">
-  <div class="card-header">
-    <div class="dot"></div>
-    <span>上传 PDF</span>
-  </div>
-  <div class="card-body">
-    <div class="drop-zone" id="dropZone">
-      <input type="file" id="fileInput" accept=".pdf">
-      <div class="drop-icon">📄</div>
-      <div class="drop-title">点击选择或拖拽 PDF 文件到此处</div>
-      <div class="drop-sub">支持中英文混排 PDF，最大 50 MB</div>
-    </div>
-    <div class="file-info" id="fileInfo">
-      <div class="file-info-icon">📑</div>
-      <div class="file-info-text">
-        <div class="file-info-name" id="fileName">—</div>
-        <div class="file-info-size" id="fileSize">—</div>
+<!-- 标签页切换 -->
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('mp3', this)">🎵 PDF → MP3</button>
+  <button class="tab-btn" onclick="switchTab('wm', this)">🧹 图片去水印</button>
+  <button class="tab-btn" onclick="switchTab('video', this)">🎬 视频 → TXT</button>
+  <button class="tab-btn" onclick="switchTab('subtitle', this)">🔤 视频加字幕</button>
+</div>
+
+<!-- ════════════════ 面板 1：PDF → MP3 ════════════════ -->
+<div class="panel active" id="panel-mp3">
+
+  <div class="card">
+    <div class="card-header"><div class="dot"></div><span>上传 PDF</span></div>
+    <div class="card-body">
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept=".pdf">
+        <div class="drop-icon">📄</div>
+        <div class="drop-title">点击选择或拖拽 PDF 文件到此处</div>
+        <div class="drop-sub">支持中英文混排 PDF，最大 50 MB</div>
       </div>
-      <button class="file-clear" onclick="clearFile()" title="重新选择">✕</button>
-    </div>
-  </div>
-</div>
-
-<!-- 设置卡片 -->
-<div class="card">
-  <div class="card-header">
-    <div class="dot"></div>
-    <span>转换设置</span>
-  </div>
-  <div class="card-body">
-
-    <div class="field">
-      <label>页码范围</label>
-      <div class="page-row">
-        <span>从第</span>
-        <input class="page-input" type="number" id="startPage" value="1" min="1">
-        <span>页 &nbsp;到第</span>
-        <input class="page-input" type="number" id="endPage" value="50" min="1">
-        <span>页</span>
+      <div class="file-info" id="fileInfo">
+        <div class="file-info-icon">📑</div>
+        <div class="file-info-text">
+          <div class="file-info-name" id="fileName">—</div>
+          <div class="file-info-size" id="fileSize">—</div>
+        </div>
+        <button class="file-clear" onclick="clearFile()" title="重新选择">✕</button>
       </div>
     </div>
+  </div>
 
-    <div class="field">
-      <label>朗读声音</label>
-      <div class="radio-grid" id="voiceGroup">
-        <label class="radio-option selected">
-          <input type="radio" name="voice" value="zh-CN-XiaoxiaoNeural" checked> 晓晓（女·温柔自然）
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="voice" value="zh-CN-YunxiNeural"> 云希（男·自然流畅）
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="voice" value="zh-CN-XiaoyiNeural"> 晓伊（女·活泼明快）
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="voice" value="zh-CN-YunjianNeural"> 云健（男·沉稳有力）
-        </label>
+  <div class="card">
+    <div class="card-header"><div class="dot"></div><span>转换设置</span></div>
+    <div class="card-body">
+      <div class="field">
+        <label>页码范围</label>
+        <div class="page-row">
+          <span>从第</span>
+          <input class="page-input" type="number" id="startPage" value="1" min="1">
+          <span>页 &nbsp;到第</span>
+          <input class="page-input" type="number" id="endPage" value="50" min="1">
+          <span>页</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>朗读声音</label>
+        <div class="radio-grid" id="voiceGroup">
+          <label class="radio-option selected">
+            <input type="radio" name="voice" value="zh-CN-XiaoxiaoNeural" checked> 晓晓（女·温柔自然）
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="voice" value="zh-CN-YunxiNeural"> 云希（男·自然流畅）
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="voice" value="zh-CN-XiaoyiNeural"> 晓伊（女·活泼明快）
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="voice" value="zh-CN-YunjianNeural"> 云健（男·沉稳有力）
+          </label>
+        </div>
+      </div>
+      <div class="field">
+        <label>朗读语速</label>
+        <div class="radio-grid" id="rateGroup">
+          <label class="radio-option">
+            <input type="radio" name="rate" value="-20%"> 慢速 −20%
+          </label>
+          <label class="radio-option selected">
+            <input type="radio" name="rate" value="+0%" checked> 正常 ±0%
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="rate" value="+15%"> 较快 +15%
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="rate" value="+30%"> 快速 +30%
+          </label>
+        </div>
       </div>
     </div>
+  </div>
 
-    <div class="field">
-      <label>朗读语速</label>
-      <div class="radio-grid" id="rateGroup">
-        <label class="radio-option">
-          <input type="radio" name="rate" value="-20%"> 慢速 −20%
-        </label>
-        <label class="radio-option selected">
-          <input type="radio" name="rate" value="+0%" checked> 正常 ±0%
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="rate" value="+15%"> 较快 +15%
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="rate" value="+30%"> 快速 +30%
-        </label>
+  <div style="margin-bottom:16px;">
+    <button class="submit-btn" id="startBtn" onclick="startConvert()">▶&nbsp;&nbsp;开始转换</button>
+  </div>
+
+  <div class="card result-card" id="resultCard">
+    <div class="card-header"><div class="dot"></div><span>处理进度</span></div>
+    <div class="card-body">
+      <div class="status-row">
+        <div class="status-dot" id="statusDot"></div>
+        <div class="status-text" id="statusText">准备中…</div>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="log-area" id="logArea"></div>
+      <a class="download-btn" id="downloadBtn" href="#" download="output.mp3">
+        ⬇️&nbsp;&nbsp;下载 MP3
+      </a>
+    </div>
+  </div>
+
+</div><!-- /panel-mp3 -->
+
+<!-- ════════════════ 面板 2：去水印 ════════════════ -->
+<div class="panel" id="panel-wm">
+
+  <div class="card">
+    <div class="card-header"><div class="dot"></div><span>上传图片</span></div>
+    <div class="card-body">
+      <div class="info-box" style="background:var(--green-xl);border-left:3px solid var(--green);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--ink2);line-height:1.7;margin-bottom:16px;">
+        <strong style="color:var(--green);">使用方法：</strong>上传图片后，在预览图上<strong style="color:var(--green);">拖拽框选</strong>水印区域，可添加多个区域，然后点击去水印
+      </div>
+      <div class="drop-zone" id="wmDropZone">
+        <input type="file" id="wmFileInput" accept=".jpg,.jpeg,.png,.webp,.bmp">
+        <div class="drop-icon">🖼️</div>
+        <div class="drop-title">点击选择或拖拽图片到此处</div>
+        <div class="drop-sub">支持 JPG / PNG / WebP / BMP，最大 20 MB</div>
+      </div>
+      <div class="file-info" id="wmFileInfo">
+        <div class="file-info-icon">🖼️</div>
+        <div class="file-info-text">
+          <div class="file-info-name" id="wmFileName">—</div>
+          <div class="file-info-size" id="wmFileSize">—</div>
+        </div>
+        <button class="file-clear" onclick="wmClearFile()" title="重新选择">✕</button>
+      </div>
+
+      <!-- 图片预览 + 框选 canvas -->
+      <div class="canvas-wrap" id="wmCanvasWrap">
+        <canvas id="imgCanvas"></canvas>
+      </div>
+      <p class="canvas-hint" id="wmCanvasHint" style="display:none;">
+        在图片上拖拽框选水印区域，可添加多个框
+      </p>
+
+      <!-- 已选区域标签 -->
+      <div class="region-list" id="wmRegionList"></div>
+    </div>
+  </div>
+
+  <div style="margin-bottom:16px;">
+    <button class="submit-btn" id="wmStartBtn" onclick="startWatermark()">🧹&nbsp;&nbsp;开始去水印</button>
+  </div>
+
+  <!-- 下载按钮（同步处理，无进度面板） -->
+  <div class="card" id="wmResultCard" style="display:none;">
+    <div class="card-body" style="text-align:center;">
+      <a class="download-btn show" id="wmDownloadBtn" href="#" download>
+        ⬇️&nbsp;&nbsp;下载去水印图片
+      </a>
+    </div>
+  </div>
+
+</div><!-- /panel-wm -->
+
+<!-- ════════════════ 面板 3：视频 → TXT ════════════════ -->
+<div class="panel" id="panel-video">
+
+  <div class="card">
+    <div class="card-header"><div class="dot"></div><span>视频来源</span></div>
+    <div class="card-body">
+      <div class="mode-switch" id="modeSwitch">
+        <button class="mode-btn active" onclick="switchMode('local')">📁&nbsp; 上传本地视频</button>
+        <button class="mode-btn" onclick="switchMode('baidu')">☁️&nbsp; 百度网盘链接</button>
+      </div>
+      <div id="modeLocal">
+        <div class="drop-zone" id="videoDropZone">
+          <input type="file" id="videoFileInput" accept="video/*,audio/*,.mkv,.flv,.rmvb,.ts,.wma,.opus,.amr" multiple>
+          <div class="drop-icon">🎬</div>
+          <div class="drop-title">点击选择或拖拽视频 / 音频文件（支持多选）</div>
+          <div class="drop-sub">视频：MP4 / MOV / MKV / AVI / FLV 等 &nbsp;·&nbsp; 音频：MP3 / WAV / M4A / AAC / FLAC 等</div>
+        </div>
+        <div class="video-file-list" id="videoFileList"></div>
+      </div>
+      <div id="modeBaidu" style="display:none">
+        <div class="field">
+          <label>分享链接（多条用分号 <code>;</code> 隔开）</label>
+          <textarea class="link-input" id="videoLinks" rows="8"
+            placeholder="支持直接粘贴百度网盘批量分享文本，例如：&#10;&#10;链接：https://pan.baidu.com/s/1XXXXXXX&#10;提取码：abcd&#10;&#10;链接：https://pan.baidu.com/s/1YYYYYYY&#10;提取码：efgh"></textarea>
+          <div class="field-hint">直接粘贴百度网盘「分享」后复制的文本即可，可一次粘贴多个</div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label>百度网盘 Cookie（必填）</label>
+          <textarea class="link-input" id="bdussCookie" rows="3"
+            style="font-size:12px;min-height:80px;"
+            placeholder="粘贴完整 Cookie，例如：BDUSS=xxx; STOKEN=yyy; ..."></textarea>
+          <div class="field-hint">获取方法：登录 pan.baidu.com → F12 → Network → 刷新 → 点任意请求 → Request Headers → 复制 Cookie 整行</div>
+        </div>
       </div>
     </div>
-
   </div>
-</div>
 
-<!-- 开始按钮 -->
-<div style="width:100%;max-width:600px;margin-bottom:16px;">
-  <button class="submit-btn" id="startBtn" onclick="startConvert()">
-    ▶&nbsp;&nbsp;开始转换
-  </button>
-</div>
-
-<!-- 进度 & 结果卡片 -->
-<div class="card" id="resultCard">
-  <div class="card-header">
-    <div class="dot"></div>
-    <span>处理进度</span>
+  <div style="margin-bottom:16px;">
+    <button class="submit-btn" id="videoStartBtn" onclick="startVideoProcess()">▶&nbsp;&nbsp;开始转录</button>
   </div>
-  <div class="card-body">
-    <div class="status-row">
-      <div class="status-dot" id="statusDot"></div>
-      <div class="status-text" id="statusText">准备中…</div>
+
+  <div class="card result-card" id="videoResultCard">
+    <div class="card-header"><div class="dot"></div><span>处理进度</span></div>
+    <div class="card-body">
+      <div class="status-row">
+        <div class="status-dot" id="videoStatusDot"></div>
+        <div class="status-text" id="videoStatusText">准备中…</div>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="videoProgressFill"></div>
+      </div>
+      <div class="log-area" id="videoLogArea"></div>
+      <div class="video-list" id="videoList"></div>
+      <a class="download-btn" id="videoDownloadAllBtn" href="#" download="transcriptions.zip">
+        ⬇️&nbsp;&nbsp;下载全部 TXT（ZIP）
+      </a>
     </div>
-    <div class="progress-track">
-      <div class="progress-fill" id="progressFill"></div>
-    </div>
-    <div class="log-area" id="logArea"></div>
-    <a class="download-btn" id="downloadBtn" href="#" download="output.mp3">
-      ⬇️&nbsp;&nbsp;下载 MP3
-    </a>
   </div>
-</div>
+
+</div><!-- /panel-video -->
+
+<!-- ════════════════ 面板 4：视频加字幕 ════════════════ -->
+<div class="panel" id="panel-subtitle">
+
+  <div class="card">
+    <div class="card-header"><div class="dot"></div><span>上传视频</span></div>
+    <div class="card-body">
+      <div class="drop-zone" id="subDropZone">
+        <input type="file" id="subFileInput" accept="video/*">
+        <div class="drop-icon">🎬</div>
+        <div class="drop-title">点击选择或拖拽视频文件到此处</div>
+        <div class="drop-sub">支持 MP4 / AVI / MKV / MOV 等常见格式</div>
+      </div>
+      <div class="file-info" id="subFileInfo" style="display:none">
+        <div class="file-info-icon">🎬</div>
+        <div class="file-info-text">
+          <div class="file-info-name" id="subFileName">-</div>
+          <div class="file-info-size" id="subFileSize">-</div>
+        </div>
+        <button class="file-clear" onclick="clearSubFile()" title="重新选择">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="dot"></div><span>字幕设置</span></div>
+    <div class="card-body">
+      <div class="field">
+        <label>字体大小</label>
+        <div class="radio-row">
+          <label class="radio-item"><input type="radio" name="subFontSize" value="small"><span>小号 (16px)</span></label>
+          <label class="radio-item"><input type="radio" name="subFontSize" value="medium" checked><span>中号 (24px)</span></label>
+          <label class="radio-item"><input type="radio" name="subFontSize" value="large"><span>大号 (36px)</span></label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-bottom:16px;">
+    <button class="submit-btn" id="subStartBtn" onclick="startSubtitle()">▶&nbsp;&nbsp;开始生成字幕视频</button>
+  </div>
+
+  <div class="card" id="subProgressCard" style="display:none">
+    <div class="card-header"><div class="dot"></div><span>处理进度</span></div>
+    <div class="card-body">
+      <div class="status-row">
+        <div class="status-dot running" id="subStatusDot"></div>
+        <div class="status-text" id="subStatusText">处理中…</div>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill running" id="subProgressFill"></div>
+      </div>
+      <div class="log-area" id="subLogArea"></div>
+      <a class="download-btn" id="subDownloadBtn" href="#" download style="display:none;margin-top:12px;">
+        ⬇&nbsp;&nbsp;下载字幕视频
+      </a>
+    </div>
+  </div>
+
+</div><!-- /panel-subtitle -->
 
 <footer>
-  使用 <a href="https://github.com/rany2/edge-tts">edge-tts</a> 生成语音 ·
+  使用 <a href="https://github.com/rany2/edge-tts">edge-tts</a> &amp;
+  <a href="https://pymupdf.readthedocs.io">PyMuPDF</a> &amp;
+  <a href="https://github.com/guillaumekln/faster-whisper">faster-whisper</a> 驱动 ·
   数据仅用于转换，不做存储
 </footer>
 
 <script>
+// ══════════════════════════════════════════════
+//  标签页切换
+// ══════════════════════════════════════════════
+function switchTab(name, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+// ══════════════════════════════════════════════
+//  工具函数
+// ══════════════════════════════════════════════
+function formatSize(bytes) {
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+// ══════════════════════════════════════════════
+//  面板1：PDF → MP3
+// ══════════════════════════════════════════════
 let currentFile = null;
 let currentTaskId = null;
 let pollInterval = null;
 let logCount = 0;
 
-// ── 文件选择 ──────────────────────────────────────────────────
-
-document.getElementById('fileInput').addEventListener('change', e => {
-  handleFile(e.target.files[0]);
-});
+document.getElementById('fileInput').addEventListener('change', e => handleFile(e.target.files[0]));
 
 const dropZone = document.getElementById('dropZone');
-dropZone.addEventListener('dragover', e => {
-  e.preventDefault();
-  dropZone.classList.add('drag-over');
-});
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
+  e.preventDefault(); dropZone.classList.remove('drag-over');
   handleFile(e.dataTransfer.files[0]);
 });
 
 function handleFile(file) {
   if (!file) return;
-  if (!file.name.toLowerCase().endsWith('.pdf')) {
-    alert('请选择 PDF 文件！'); return;
-  }
+  if (!file.name.toLowerCase().endsWith('.pdf')) { alert('请选择 PDF 文件！'); return; }
   currentFile = file;
   document.getElementById('fileName').textContent = file.name;
   document.getElementById('fileSize').textContent = formatSize(file.size);
@@ -438,13 +813,6 @@ function clearFile() {
   document.getElementById('fileInfo').classList.remove('show');
 }
 
-function formatSize(bytes) {
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-}
-
-// ── 单选高亮 ─────────────────────────────────────────────────
-
 document.querySelectorAll('.radio-option input').forEach(radio => {
   radio.addEventListener('change', () => {
     const group = radio.closest('.radio-grid');
@@ -453,21 +821,16 @@ document.querySelectorAll('.radio-option input').forEach(radio => {
   });
 });
 
-// ── 开始转换 ─────────────────────────────────────────────────
-
 async function startConvert() {
   if (!currentFile) { alert('请先选择 PDF 文件！'); return; }
-
   const start = parseInt(document.getElementById('startPage').value);
   const end   = parseInt(document.getElementById('endPage').value);
   if (isNaN(start) || isNaN(end) || start < 1 || end < start) {
     alert('页码范围无效！请检查起止页码。'); return;
   }
-
   const voice = document.querySelector('input[name=voice]:checked').value;
   const rate  = document.querySelector('input[name=rate]:checked').value;
 
-  // 重置 UI
   logCount = 0;
   document.getElementById('logArea').textContent = '';
   document.getElementById('downloadBtn').classList.remove('show');
@@ -475,28 +838,19 @@ async function startConvert() {
   document.getElementById('startBtn').disabled = true;
   setStatus('上传文件…', 'running');
 
-  // 上传
   const fd = new FormData();
   fd.append('pdf', currentFile);
-  fd.append('start', start);
-  fd.append('end', end);
-  fd.append('voice', voice);
-  fd.append('rate', rate);
+  fd.append('start', start); fd.append('end', end);
+  fd.append('voice', voice); fd.append('rate', rate);
 
   let res;
-  try {
-    res = await fetch('/upload', { method: 'POST', body: fd });
-  } catch (e) {
-    setStatus('网络错误', 'error');
-    document.getElementById('startBtn').disabled = false;
-    return;
-  }
+  try { res = await fetch('/upload', { method: 'POST', body: fd }); }
+  catch (e) { setStatus('网络错误', 'error'); document.getElementById('startBtn').disabled = false; return; }
 
   const data = await res.json();
   if (!res.ok || data.error) {
     setStatus('❌ ' + (data.error || '上传失败'), 'error');
-    document.getElementById('startBtn').disabled = false;
-    return;
+    document.getElementById('startBtn').disabled = false; return;
   }
 
   currentTaskId = data.task_id;
@@ -504,26 +858,18 @@ async function startConvert() {
   pollInterval = setInterval(pollStatus, 600);
 }
 
-// ── 轮询状态 ─────────────────────────────────────────────────
-
 async function pollStatus() {
   if (!currentTaskId) return;
   try {
     const res  = await fetch(`/status/${currentTaskId}?from=${logCount}`);
     const data = await res.json();
-
-    // 追加日志
     const logEl = document.getElementById('logArea');
-    for (const line of data.logs) {
-      logEl.textContent += line + '\n';
-    }
+    for (const line of data.logs) { logEl.textContent += line + '\n'; }
     logEl.scrollTop = logEl.scrollHeight;
     logCount += data.logs.length;
-
     if (data.done) {
       clearInterval(pollInterval);
       document.getElementById('startBtn').disabled = false;
-
       if (data.success) {
         setStatus('✅ 转换完成！', 'done');
         const btn = document.getElementById('downloadBtn');
@@ -533,31 +879,488 @@ async function pollStatus() {
         setStatus('❌ 转换失败，请查看日志', 'error');
       }
     }
-  } catch(e) {
-    // 忽略轮询的网络错误
-  }
+  } catch(e) {}
 }
-
-// ── 状态 UI ──────────────────────────────────────────────────
 
 function setStatus(text, state) {
   document.getElementById('statusText').textContent = text;
   const dot  = document.getElementById('statusDot');
   const fill = document.getElementById('progressFill');
   dot.className = 'status-dot ' + state;
+  if (state === 'running') { fill.className = 'progress-fill running'; fill.style.width = ''; }
+  else if (state === 'done')  { fill.className = 'progress-fill'; fill.style.width = '100%'; fill.style.background = 'var(--green)'; }
+  else if (state === 'error') { fill.className = 'progress-fill'; fill.style.width = '100%'; fill.style.background = 'var(--red)'; }
+}
 
-  if (state === 'running') {
-    fill.className = 'progress-fill running';
-    fill.style.width = '';
-  } else if (state === 'done') {
-    fill.className = 'progress-fill';
-    fill.style.width = '100%';
-    fill.style.background = 'var(--green)';
-  } else if (state === 'error') {
-    fill.className = 'progress-fill';
-    fill.style.width = '100%';
-    fill.style.background = 'var(--red)';
+// ══════════════════════════════════════════════
+//  面板2：图片去水印
+// ══════════════════════════════════════════════
+let wmFile = null;
+let wmRegions = [];      // [{x,y,w,h} in original image coords]
+let wmImgNaturalW = 0;
+let wmImgNaturalH = 0;
+
+// 框选状态
+let wmDragging = false;
+let wmDragStart = null;
+
+const wmFileInput  = document.getElementById('wmFileInput');
+const wmDropZone   = document.getElementById('wmDropZone');
+const wmCanvas     = document.getElementById('imgCanvas');
+const wmCtx        = wmCanvas.getContext('2d');
+let   wmImage      = null;  // HTMLImageElement
+
+wmFileInput.addEventListener('change', e => wmHandleFile(e.target.files[0]));
+
+wmDropZone.addEventListener('dragover', e => { e.preventDefault(); wmDropZone.classList.add('drag-over'); });
+wmDropZone.addEventListener('dragleave', () => wmDropZone.classList.remove('drag-over'));
+wmDropZone.addEventListener('drop', e => {
+  e.preventDefault(); wmDropZone.classList.remove('drag-over');
+  wmHandleFile(e.dataTransfer.files[0]);
+});
+
+function wmHandleFile(file) {
+  if (!file) return;
+  const ext = file.name.toLowerCase().split('.').pop();
+  if (!['jpg','jpeg','png','webp','bmp'].includes(ext)) {
+    alert('请选择 JPG / PNG / WebP / BMP 图片！'); return;
   }
+  wmFile = file;
+  document.getElementById('wmFileName').textContent = file.name;
+  document.getElementById('wmFileSize').textContent = formatSize(file.size);
+  document.getElementById('wmFileInfo').classList.add('show');
+  wmRegions = [];
+  renderRegionTags();
+
+  // 预览图片
+  const url = URL.createObjectURL(file);
+  wmImage = new Image();
+  wmImage.onload = () => {
+    wmImgNaturalW = wmImage.naturalWidth;
+    wmImgNaturalH = wmImage.naturalHeight;
+    // 让 canvas 宽度填满容器，高度等比缩放
+    const containerW = wmCanvas.parentElement.clientWidth || 560;
+    const scale = Math.min(1, containerW / wmImgNaturalW);
+    wmCanvas.width  = Math.round(wmImgNaturalW * scale);
+    wmCanvas.height = Math.round(wmImgNaturalH * scale);
+    drawCanvas();
+    document.getElementById('wmCanvasWrap').classList.add('show');
+    document.getElementById('wmCanvasHint').style.display = '';
+  };
+  wmImage.src = url;
+}
+
+function wmClearFile() {
+  wmFile = null;
+  wmImage = null;
+  wmRegions = [];
+  wmFileInput.value = '';
+  document.getElementById('wmFileInfo').classList.remove('show');
+  document.getElementById('wmCanvasWrap').classList.remove('show');
+  document.getElementById('wmCanvasHint').style.display = 'none';
+  document.getElementById('wmResultCard').style.display = 'none';
+  renderRegionTags();
+}
+
+// ── canvas 绘制 ──
+function drawCanvas() {
+  if (!wmImage) return;
+  wmCtx.clearRect(0, 0, wmCanvas.width, wmCanvas.height);
+  wmCtx.drawImage(wmImage, 0, 0, wmCanvas.width, wmCanvas.height);
+  const scaleX = wmCanvas.width  / wmImgNaturalW;
+  const scaleY = wmCanvas.height / wmImgNaturalH;
+  wmRegions.forEach((r, i) => {
+    const cx = r.x * scaleX, cy = r.y * scaleY;
+    const cw = r.w * scaleX, ch = r.h * scaleY;
+    wmCtx.strokeStyle = '#2D6A4F';
+    wmCtx.lineWidth = 2;
+    wmCtx.strokeRect(cx, cy, cw, ch);
+    wmCtx.fillStyle = 'rgba(45,106,79,0.18)';
+    wmCtx.fillRect(cx, cy, cw, ch);
+    // 序号标签
+    wmCtx.fillStyle = '#2D6A4F';
+    wmCtx.font = 'bold 13px sans-serif';
+    wmCtx.fillText(i + 1, cx + 4, cy + 15);
+  });
+}
+
+// ── 拖拽框选事件 ──
+function canvasPos(e) {
+  const rect = wmCanvas.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return {
+    x: (clientX - rect.left) * (wmCanvas.width  / rect.width),
+    y: (clientY - rect.top)  * (wmCanvas.height / rect.height)
+  };
+}
+
+wmCanvas.addEventListener('mousedown', e => {
+  wmDragging = true;
+  wmDragStart = canvasPos(e);
+});
+
+wmCanvas.addEventListener('mousemove', e => {
+  if (!wmDragging) return;
+  const cur = canvasPos(e);
+  drawCanvas();
+  // 实时预览选框
+  const sx = Math.min(wmDragStart.x, cur.x);
+  const sy = Math.min(wmDragStart.y, cur.y);
+  const sw = Math.abs(cur.x - wmDragStart.x);
+  const sh = Math.abs(cur.y - wmDragStart.y);
+  wmCtx.strokeStyle = '#D94F4F';
+  wmCtx.lineWidth = 2;
+  wmCtx.setLineDash([4, 3]);
+  wmCtx.strokeRect(sx, sy, sw, sh);
+  wmCtx.setLineDash([]);
+  wmCtx.fillStyle = 'rgba(217,79,79,0.12)';
+  wmCtx.fillRect(sx, sy, sw, sh);
+});
+
+wmCanvas.addEventListener('mouseup', e => {
+  if (!wmDragging) return;
+  wmDragging = false;
+  const cur = canvasPos(e);
+  const scaleX = wmImgNaturalW / wmCanvas.width;
+  const scaleY = wmImgNaturalH / wmCanvas.height;
+  const sx = Math.min(wmDragStart.x, cur.x) * scaleX;
+  const sy = Math.min(wmDragStart.y, cur.y) * scaleY;
+  const sw = Math.abs(cur.x - wmDragStart.x) * scaleX;
+  const sh = Math.abs(cur.y - wmDragStart.y) * scaleY;
+  if (sw > 4 && sh > 4) {
+    wmRegions.push({ x: Math.round(sx), y: Math.round(sy), w: Math.round(sw), h: Math.round(sh) });
+    renderRegionTags();
+  }
+  drawCanvas();
+});
+
+wmCanvas.addEventListener('mouseleave', () => {
+  if (wmDragging) { wmDragging = false; drawCanvas(); }
+});
+
+function renderRegionTags() {
+  const list = document.getElementById('wmRegionList');
+  list.innerHTML = wmRegions.map((r, i) => `
+    <div class="region-tag">
+      区域 ${i+1}（${r.w}×${r.h}）
+      <button onclick="wmRemoveRegion(${i})" title="删除">✕</button>
+    </div>`).join('');
+}
+
+function wmRemoveRegion(i) {
+  wmRegions.splice(i, 1);
+  renderRegionTags();
+  drawCanvas();
+}
+
+// ── 提交去水印 ──
+async function startWatermark() {
+  if (!wmFile) { alert('请先上传图片！'); return; }
+  if (wmRegions.length === 0) { alert('请在图片上框选至少一个水印区域！'); return; }
+
+  document.getElementById('wmStartBtn').disabled = true;
+  document.getElementById('wmStartBtn').textContent = '处理中…';
+
+  const fd = new FormData();
+  fd.append('image', wmFile);
+  fd.append('regions', JSON.stringify(wmRegions));
+
+  let res;
+  try {
+    res = await fetch('/upload/image-watermark', { method: 'POST', body: fd });
+  } catch(e) {
+    alert('网络错误，请重试');
+    document.getElementById('wmStartBtn').disabled = false;
+    document.getElementById('wmStartBtn').textContent = '🧹  开始去水印';
+    return;
+  }
+
+  const data = await res.json();
+  document.getElementById('wmStartBtn').disabled = false;
+  document.getElementById('wmStartBtn').textContent = '🧹  开始去水印';
+
+  if (!res.ok || data.error) {
+    alert('❌ ' + (data.error || '处理失败'));
+    return;
+  }
+
+  const ext = wmFile.name.split('.').pop();
+  const resultCard = document.getElementById('wmResultCard');
+  const downloadBtn = document.getElementById('wmDownloadBtn');
+  downloadBtn.href = `/download/image-watermark/${data.task_id}`;
+  downloadBtn.download = `nowatermark.${ext}`;
+  resultCard.style.display = 'block';
+}
+// ══════════════════════════════════════════════
+//  面板3：视频 → TXT
+// ══════════════════════════════════════════════
+let videoMode = 'local';
+let selectedVideoFiles = [];
+let videoTaskId = null;
+let videoPollInterval = null;
+let videoLogCount = 0;
+
+function switchMode(mode) {
+  videoMode = mode;
+  document.querySelectorAll('.mode-btn').forEach((b, i) => {
+    b.classList.toggle('active', (i === 0) === (mode === 'local'));
+  });
+  document.getElementById('modeLocal').style.display  = mode === 'local' ? '' : 'none';
+  document.getElementById('modeBaidu').style.display  = mode === 'baidu' ? '' : 'none';
+}
+
+const VIDEO_EXTS_JS = new Set([
+  '.mp4','.avi','.mov','.mkv','.flv','.wmv','.webm','.m4v','.ts','.rmvb',
+  '.mp3','.wav','.m4a','.aac','.ogg','.flac','.wma','.opus','.amr',
+]);
+
+document.getElementById('videoFileInput').addEventListener('change', e => {
+  addVideoFiles([...e.target.files]); e.target.value = '';
+});
+
+const videoDropZone = document.getElementById('videoDropZone');
+videoDropZone.addEventListener('dragover', e => { e.preventDefault(); videoDropZone.classList.add('drag-over'); });
+videoDropZone.addEventListener('dragleave', () => videoDropZone.classList.remove('drag-over'));
+videoDropZone.addEventListener('drop', e => {
+  e.preventDefault(); videoDropZone.classList.remove('drag-over');
+  addVideoFiles([...e.dataTransfer.files]);
+});
+
+function addVideoFiles(files) {
+  for (const f of files) {
+    const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase();
+    if (!VIDEO_EXTS_JS.has(ext)) { alert(`不支持的格式：${f.name}`); continue; }
+    if (!selectedVideoFiles.find(x => x.name === f.name && x.size === f.size)) {
+      selectedVideoFiles.push(f);
+    }
+  }
+  renderVideoFileList();
+}
+
+function removeVideoFile(idx) {
+  selectedVideoFiles.splice(idx, 1);
+  renderVideoFileList();
+}
+
+function renderVideoFileList() {
+  const el = document.getElementById('videoFileList');
+  el.innerHTML = '';
+  selectedVideoFiles.forEach((f, i) => {
+    const row = document.createElement('div');
+    row.className = 'video-file-item';
+    row.innerHTML = `<span style="font-size:18px">🎬</span>
+      <span class="vf-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <span class="vf-size">${formatSize(f.size)}</span>
+      <button class="vf-del" onclick="removeVideoFile(${i})" title="移除">✕</button>`;
+    el.appendChild(row);
+  });
+}
+
+async function startVideoProcess() {
+  videoLogCount = 0;
+  document.getElementById('videoLogArea').textContent = '';
+  document.getElementById('videoList').innerHTML = '';
+  document.getElementById('videoDownloadAllBtn').classList.remove('show');
+  document.getElementById('videoResultCard').classList.add('show');
+  document.getElementById('videoStartBtn').disabled = true;
+  setVideoStatus('提交任务…', 'running');
+
+  let res;
+  if (videoMode === 'local') {
+    if (selectedVideoFiles.length === 0) {
+      alert('请先选择至少一个视频文件！');
+      document.getElementById('videoStartBtn').disabled = false; return;
+    }
+    const fd = new FormData();
+    selectedVideoFiles.forEach(f => fd.append('videos', f));
+    try { res = await fetch('/video/upload', { method: 'POST', body: fd }); }
+    catch (e) { setVideoStatus('❌ 网络错误', 'error'); document.getElementById('videoStartBtn').disabled = false; return; }
+  } else {
+    const linksRaw = document.getElementById('videoLinks').value.trim();
+    if (!linksRaw) { alert('请输入至少一条百度网盘分享链接！'); document.getElementById('videoStartBtn').disabled = false; return; }
+    const bduss = document.getElementById('bdussCookie').value.trim();
+    try {
+      res = await fetch('/video/process', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ links: linksRaw, bduss }),
+      });
+    } catch (e) { setVideoStatus('❌ 网络错误', 'error'); document.getElementById('videoStartBtn').disabled = false; return; }
+  }
+
+  let data;
+  try { data = await res.json(); }
+  catch (_) { setVideoStatus(`❌ 服务器返回异常 HTTP ${res.status}`, 'error'); document.getElementById('videoStartBtn').disabled = false; return; }
+
+  if (!res.ok || data.error) {
+    setVideoStatus('❌ ' + (data.error || `HTTP ${res.status}`), 'error');
+    document.getElementById('videoStartBtn').disabled = false; return;
+  }
+
+  videoTaskId = data.task_id;
+  setVideoStatus(`处理中（共 ${data.count} 个视频）…`, 'running');
+  videoPollInterval = setInterval(pollVideoStatus, 800);
+}
+
+async function pollVideoStatus() {
+  if (!videoTaskId) return;
+  try {
+    const res  = await fetch(`/video/status/${videoTaskId}?from=${videoLogCount}`);
+    const data = await res.json();
+    const logEl = document.getElementById('videoLogArea');
+    for (const line of data.global_logs) { logEl.textContent += line + '\n'; }
+    logEl.scrollTop = logEl.scrollHeight;
+    videoLogCount += data.global_logs.length;
+    renderVideoList(data.videos);
+    if (data.done) {
+      clearInterval(videoPollInterval);
+      document.getElementById('videoStartBtn').disabled = false;
+      const doneN  = data.videos.filter(v => v.status === 'done').length;
+      const errorN = data.videos.filter(v => v.status === 'error').length;
+      if (doneN > 0) {
+        setVideoStatus(`✅ 完成！${doneN} 成功${errorN ? ' / ' + errorN + ' 失败' : ''}`, 'done');
+        const allBtn = document.getElementById('videoDownloadAllBtn');
+        allBtn.href = `/video/download_all/${videoTaskId}`;
+        allBtn.classList.add('show');
+      } else {
+        setVideoStatus('❌ 全部失败，请查看日志', 'error');
+      }
+    }
+  } catch(e) {}
+}
+
+function renderVideoList(videos) {
+  const listEl = document.getElementById('videoList');
+  listEl.innerHTML = '';
+  videos.forEach((v, i) => {
+    const item = document.createElement('div');
+    item.className = 'video-item ' + (
+      v.status === 'done'  ? 'done'  :
+      v.status === 'error' ? 'error' :
+      ['downloading','extracting','transcribing'].includes(v.status) ? 'active' : ''
+    );
+    const icon = { pending:'⏳', downloading:'⬇️', extracting:'🔊', transcribing:'✍️', done:'✅', error:'❌' }[v.status] || '⏳';
+    const sub  = v.status === 'error'
+      ? (v.error || '处理失败')
+      : { pending:'等待中', downloading:'下载中…', extracting:'提取音频…', transcribing:'语音转文字…', done:'转录完成' }[v.status] || v.status;
+    item.innerHTML = `
+      <div class="video-status-icon">${icon}</div>
+      <div class="video-info">
+        <div class="video-title" title="${escHtml(v.title)}">${escHtml(v.title)}</div>
+        <div class="video-sub">${escHtml(sub)}</div>
+      </div>
+      ${v.has_txt ? `<a class="video-dl-btn" href="/video/download/${videoTaskId}/${i}" download="${escHtml(v.txt_filename || 'transcript.txt')}">⬇ TXT</a>` : ''}`;
+    listEl.appendChild(item);
+  });
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function setVideoStatus(text, state) {
+  document.getElementById('videoStatusText').textContent = text;
+  const dot  = document.getElementById('videoStatusDot');
+  const fill = document.getElementById('videoProgressFill');
+  dot.className = 'status-dot ' + state;
+  if (state === 'running') { fill.className = 'progress-fill running'; fill.style.width = ''; }
+  else { fill.className = 'progress-fill'; fill.style.width = '100%'; fill.style.background = state === 'done' ? 'var(--green)' : 'var(--red)'; }
+}
+
+// ══════════════════════════════════════════════
+//  面板4：视频加字幕
+// ══════════════════════════════════════════════
+let subFile = null;
+let subTaskId = null;
+let subPollInterval = null;
+let subLogCount = 0;
+
+document.getElementById('subFileInput').addEventListener('change', e => handleSubFile(e.target.files[0]));
+
+const subDropZone = document.getElementById('subDropZone');
+subDropZone.addEventListener('dragover', e => { e.preventDefault(); subDropZone.classList.add('drag-over'); });
+subDropZone.addEventListener('dragleave', () => subDropZone.classList.remove('drag-over'));
+subDropZone.addEventListener('drop', e => {
+  e.preventDefault(); subDropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length) handleSubFile(e.dataTransfer.files[0]);
+});
+
+function handleSubFile(file) {
+  if (!file) return;
+  subFile = file;
+  document.getElementById('subDropZone').style.display = 'none';
+  const info = document.getElementById('subFileInfo');
+  info.style.display = 'flex';
+  document.getElementById('subFileName').textContent = file.name;
+  document.getElementById('subFileSize').textContent = (file.size / (1024*1024)).toFixed(1) + ' MB';
+}
+
+function clearSubFile() {
+  subFile = null;
+  document.getElementById('subFileInput').value = '';
+  document.getElementById('subDropZone').style.display = '';
+  document.getElementById('subFileInfo').style.display = 'none';
+}
+
+async function startSubtitle() {
+  if (!subFile) { alert('请先选择视频文件'); return; }
+  const fontSize = document.querySelector('input[name="subFontSize"]:checked').value;
+  const form = new FormData();
+  form.append('video', subFile);
+  form.append('font_size', fontSize);
+
+  document.getElementById('subStartBtn').disabled = true;
+  document.getElementById('subProgressCard').style.display = '';
+  document.getElementById('subLogArea').textContent = '';
+  document.getElementById('subDownloadBtn').style.display = 'none';
+  subLogCount = 0;
+  setSubStatus('处理中…', 'running');
+
+  try {
+    const resp = await fetch('/subtitle/upload', { method: 'POST', body: form });
+    const data = await resp.json();
+    if (!resp.ok) {
+      setSubStatus('❌ ' + (data.error || '上传失败'), 'error');
+      document.getElementById('subStartBtn').disabled = false; return;
+    }
+    subTaskId = data.task_id;
+    subPollInterval = setInterval(pollSubStatus, 800);
+  } catch (e) {
+    setSubStatus('❌ 网络错误: ' + e.message, 'error');
+    document.getElementById('subStartBtn').disabled = false;
+  }
+}
+
+async function pollSubStatus() {
+  try {
+    const resp = await fetch(`/subtitle/status/${subTaskId}?from=${subLogCount}`);
+    const data = await resp.json();
+    const logArea = document.getElementById('subLogArea');
+    data.logs.forEach(line => { logArea.textContent += line + '\n'; subLogCount++; });
+    logArea.scrollTop = logArea.scrollHeight;
+    if (data.done) {
+      clearInterval(subPollInterval);
+      document.getElementById('subStartBtn').disabled = false;
+      if (data.success) {
+        setSubStatus('✅ 字幕视频生成完成！', 'done');
+        const btn = document.getElementById('subDownloadBtn');
+        btn.href = `/subtitle/download/${subTaskId}`;
+        btn.textContent = '⬇  下载 ' + (data.output_name || '字幕视频');
+        btn.style.display = 'block';
+      } else {
+        setSubStatus('❌ 处理失败：' + (data.error || '未知错误'), 'error');
+      }
+    }
+  } catch(e) {}
+}
+
+function setSubStatus(text, state) {
+  document.getElementById('subStatusText').textContent = text;
+  const dot  = document.getElementById('subStatusDot');
+  const fill = document.getElementById('subProgressFill');
+  dot.className = 'status-dot ' + state;
+  if (state === 'running') { fill.className = 'progress-fill running'; fill.style.width = ''; }
+  else { fill.className = 'progress-fill'; fill.style.width = '100%'; fill.style.background = state === 'done' ? 'var(--green)' : 'var(--red)'; }
 }
 </script>
 </body>

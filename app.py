@@ -4,22 +4,48 @@ PDF → MP3 Web 应用（修复版）
 修复：超时保护 / 分段合成 / 逐页进度日志 / 自动重试
 """
 
-import asyncio, os, re, threading, uuid, time, tempfile
+import asyncio, os, re, threading, uuid, time, tempfile, subprocess, zipfile, io, shutil
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_file, render_template
+from watermark import remove_watermark
+from image_watermark import remove_image_watermark
 
 # 初始化 Flask 应用
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 最大 2 GB 上传
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({"error": "文件过大（最大 2 GB）"}), 413
 
 # 定义上传和输出目录
-UPLOAD_DIR = Path("uploads")  # PDF 文件上传目录
-OUTPUT_DIR = Path("outputs")  # MP3 文件输出目录
-UPLOAD_DIR.mkdir(exist_ok=True)  # 确保目录存在
+UPLOAD_DIR = Path("uploads")
+OUTPUT_DIR = Path("outputs")
+VIDEO_OUT_DIR = Path("video_outputs")
+SUBTITLE_OUT_DIR = Path("subtitle_outputs")
+UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
+VIDEO_OUT_DIR.mkdir(exist_ok=True)
+SUBTITLE_OUT_DIR.mkdir(exist_ok=True)
 
-# 全局任务字典，存储每个任务的状态
-# 结构：task_id -> {logs: [], done: bool, success: bool, mp3_path: str}
-tasks = {}
+ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+VIDEO_EXTS = {
+    ".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm", ".m4v", ".ts", ".rmvb",
+    ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".wma", ".opus", ".amr",
+}
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".wma", ".opus", ".amr"}
+FONT_SIZES = {"small": 16, "medium": 24, "large": 36}
+
+# 全局任务字典
+tasks = {}           # PDF→MP3 / 去水印任务
+video_tasks = {}     # 视频转录任务
+subtitle_tasks = {}  # 字幕任务
+
+# Whisper 模型单例（懒加载）
+_whisper_model = None
+_whisper_lock = threading.Lock()
 
 # ═══════════════════════════════════════════════════════════════
 #  文本处理
@@ -312,6 +338,29 @@ def generate_mp3(text, voice, rate, output_path, log_fn):
 #  后台任务
 # ═══════════════════════════════════════════════════════════════
 
+def run_watermark_task(task_id, pdf_path):
+    """后台去水印任务"""
+    task = tasks[task_id]
+
+    def log(msg):
+        task["logs"].append(msg)
+
+    try:
+        out_path = str(OUTPUT_DIR / f"{task_id}_nowm.pdf")
+        remove_watermark(pdf_path, out_path, log)
+        task["output_path"] = out_path
+        task["success"] = True
+        log("🎉 处理完成！点击下方按钮下载去水印 PDF")
+    except Exception as e:
+        import traceback
+        log(f"❌ 出错：{e}")
+        log(traceback.format_exc())
+    finally:
+        task["done"] = True
+        try: os.remove(pdf_path)
+        except: pass
+
+
 def run_task(task_id, pdf_path, start, end, voice, rate):
     """
     后台任务：提取 PDF 文本并生成 MP3
@@ -368,6 +417,107 @@ def index():
 def health():
     """健康检查端点，用于保持服务活跃"""
     return jsonify({"status": "ok", "time": time.time()})
+
+@app.route("/upload/watermark", methods=["POST"])
+def upload_watermark():
+    """去水印上传路由"""
+    if "pdf" not in request.files:
+        return jsonify({"error": "没有收到文件"}), 400
+    f = request.files["pdf"]
+    if not f.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "请上传 PDF 文件"}), 400
+
+    task_id  = uuid.uuid4().hex
+    pdf_path = str(UPLOAD_DIR / f"{task_id}.pdf")
+    f.save(pdf_path)
+
+    tasks[task_id] = {
+        "logs": [], "done": False,
+        "success": False, "output_path": None
+    }
+
+    threading.Thread(
+        target=run_watermark_task,
+        args=(task_id, pdf_path),
+        daemon=True
+    ).start()
+
+    return jsonify({"task_id": task_id})
+
+
+@app.route("/download/watermark/<task_id>")
+def download_watermark(task_id):
+    """下载去水印后的 PDF"""
+    task = tasks.get(task_id)
+    if not task or not task.get("output_path"):
+        return "文件不存在", 404
+    out = task["output_path"]
+    if not os.path.exists(out):
+        return "文件已过期", 404
+    return send_file(
+        out,
+        as_attachment=True,
+        download_name="nowatermark.pdf",
+        mimetype="application/pdf"
+    )
+
+
+@app.route("/upload/image-watermark", methods=["POST"])
+def upload_image_watermark():
+    """图片去水印：上传图片 + 区域坐标，返回处理后图片"""
+    if "image" not in request.files:
+        return jsonify({"error": "没有收到文件"}), 400
+    f = request.files["image"]
+    ext = os.path.splitext(f.filename.lower())[1]
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return jsonify({"error": "请上传 JPG / PNG / WebP / BMP 图片"}), 400
+
+    import json
+    try:
+        regions = json.loads(request.form.get("regions", "[]"))
+    except Exception:
+        return jsonify({"error": "区域格式错误"}), 400
+
+    if not regions:
+        return jsonify({"error": "请先在图片上框选水印区域"}), 400
+
+    task_id    = uuid.uuid4().hex
+    input_path = str(UPLOAD_DIR / f"{task_id}_in{ext}")
+    output_path = str(OUTPUT_DIR / f"{task_id}_out{ext}")
+    f.save(input_path)
+
+    try:
+        remove_image_watermark(input_path, output_path, regions)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        try: os.remove(input_path)
+        except: pass
+
+    # 存一个简单记录方便 download 路由找到文件
+    tasks[task_id] = {"output_path": output_path, "ext": ext}
+    return jsonify({"task_id": task_id})
+
+
+@app.route("/download/image-watermark/<task_id>")
+def download_image_watermark(task_id):
+    """下载去水印后的图片"""
+    task = tasks.get(task_id)
+    if not task or not task.get("output_path"):
+        return "文件不存在", 404
+    out = task["output_path"]
+    if not os.path.exists(out):
+        return "文件已过期", 404
+    ext = task.get("ext", ".png")
+    mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png", ".webp": "image/webp", ".bmp": "image/bmp"}
+    return send_file(
+        out,
+        as_attachment=True,
+        download_name=f"nowatermark{ext}",
+        mimetype=mime_map.get(ext, "application/octet-stream")
+    )
+
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -457,7 +607,835 @@ def download(task_id):
         mimetype="audio/mpeg"
     )
 
-if __name__ == "__main__":
+
+# ═══════════════════════════════════════════════════════════════
+#  视频转文字：本地上传 / 百度网盘链接 → 提取音频 → Whisper 转录
+# ═══════════════════════════════════════════════════════════════
+
+def get_whisper_model():
+    """懒加载 faster-whisper base 模型（首次调用会自动下载约 150 MB）"""
+    global _whisper_model
+    with _whisper_lock:
+        if _whisper_model is None:
+            from faster_whisper import WhisperModel
+            _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+    return _whisper_model
+
+
+def extract_audio(video_path, audio_path, log_fn):
+    """用 ffmpeg 将视频音轨提取为 16 kHz 单声道 WAV"""
+    log_fn("   正在提取音频轨道…")
+    cmd = [
+        "ffmpeg", "-y", "-i", video_path,
+        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+        audio_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=600)
+    if result.returncode != 0:
+        raise RuntimeError("ffmpeg 失败: " + result.stderr.decode(errors="replace")[:300])
+    log_fn("   音频提取完成")
+
+
+def transcribe_audio(audio_path, log_fn):
+    """用 faster-whisper 转录音频，返回纯文本字符串"""
+    log_fn("   加载 Whisper 模型（首次运行需下载约 150 MB）…")
+    model = get_whisper_model()
+    log_fn("   开始语音转文字…")
+    segments, _ = model.transcribe(audio_path, language="zh", beam_size=5, vad_filter=True)
+    lines = [seg.text.strip() for seg in segments if seg.text.strip()]
+    return "\n".join(lines)
+
+
+def _do_transcribe(task_id, video_idx, video_path, title, source_line=""):
+    """
+    公共处理核心：（视频则提取音频）→ 转录 → 保存 TXT。
+    video_path 必须是已存在的本地媒体文件路径。
+    """
+    task = video_tasks[task_id]
+    vinfo = task["videos"][video_idx]
+    tmpdir = tempfile.mkdtemp(prefix=f"aud_{task_id}_{video_idx}_")
+
+    def log(msg):
+        vinfo["logs"].append(msg)
+        task["global_logs"].append(f"[{video_idx + 1}] {msg}")
+
+    try:
+        ext = Path(video_path).suffix.lower()
+        if ext in AUDIO_EXTS:
+            audio_path = video_path
+            vinfo["status"] = "transcribing"
+        else:
+            vinfo["status"] = "extracting"
+            audio_path = os.path.join(tmpdir, "audio.wav")
+            extract_audio(video_path, audio_path, log)
+
+        vinfo["status"] = "transcribing"
+        text = transcribe_audio(audio_path, log)
+        if not text.strip():
+            raise RuntimeError("转录结果为空，视频可能没有语音内容")
+
+        cn_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+        log(f"转录完成，共 {len(text)} 字符，中文 {cn_chars} 字")
+
+        safe_title = re.sub(r'[\\/:*?"<>|]', "_", title)[:80]
+        txt_filename = f"{safe_title}.txt"
+        txt_path = str(VIDEO_OUT_DIR / f"{task_id}_{video_idx}.txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            if source_line:
+                f.write(f"来源：{source_line}\n")
+            f.write(f"标题：{title}\n")
+            f.write(f"转录时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("=" * 60 + "\n\n")
+            f.write(text)
+
+        vinfo["status"] = "done"
+        vinfo["txt_path"] = txt_path
+        vinfo["txt_filename"] = txt_filename
+        log("✅ 处理完成！")
+
+    except Exception as e:
+        import traceback as tb
+        vinfo["status"] = "error"
+        vinfo["error"] = str(e)
+        log(f"❌ 处理失败：{e}")
+        log(tb.format_exc()[:500])
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        try: os.remove(video_path)
+        except Exception: pass
+
+
+def _baidu_download(link, extraction_code, bduss_cookie, output_dir, log_fn):
+    """
+    通过百度网盘下载分享文件。
+    返回 (local_path, filename_without_ext)
+    """
+    import json as _json
+    from urllib.parse import quote, urlencode
+
+    UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+    cookie_str = ""
+    if bduss_cookie:
+        bduss_cookie = bduss_cookie.strip().replace("\n", "").replace("\r", "")
+        if "=" in bduss_cookie:
+            cookie_str = bduss_cookie
+        else:
+            cookie_str = f"BDUSS={bduss_cookie}; BDUSS_BFESS={bduss_cookie}"
+
+    log_fn(f"   [debug] cookie长度={len(cookie_str)}")
+
+    import requests as req
+    sess = req.Session()
+    sess.headers.update({
+        "User-Agent": UA,
+        "Referer": "https://pan.baidu.com/",
+        "Cookie": cookie_str,
+    })
+
+    m = re.search(r"/s/1([a-zA-Z0-9_-]+)", link)
+    if not m:
+        raise RuntimeError("链接格式无法识别，请检查是否为百度网盘分享链接")
+    surl = m.group(1)
+
+    bdstoken = ""
+    if cookie_str:
+        log_fn("   验证登录状态…")
+        try:
+            uinfo = sess.get(
+                "https://pan.baidu.com/rest/2.0/xpan/nas",
+                params={"method": "uinfo"}, timeout=30,
+            ).json()
+            log_fn(f"   [debug] uinfo={str(uinfo)[:200]}")
+            if uinfo.get("errno") == 0:
+                log_fn(f"   ✅ 登录成功，用户: {uinfo.get('baidu_name','')}")
+            else:
+                log_fn(f"   ⚠️ uinfo errno={uinfo.get('errno')}，继续尝试…")
+        except Exception as e:
+            log_fn(f"   [debug] uinfo异常: {e}")
+
+        try:
+            tpl = sess.get(
+                "https://pan.baidu.com/api/gettemplatevariable",
+                params={"clienttype": "0", "app_id": "250528",
+                        "fields": _json.dumps(["bdstoken"])},
+                timeout=15,
+            ).json()
+            if tpl.get("errno") == 0 and tpl.get("result"):
+                bdstoken = tpl["result"].get("bdstoken", "")
+        except Exception:
+            pass
+        log_fn(f"   [debug] bdstoken={'有' if bdstoken else '无'}")
+
+    log_fn("   初始化会话…")
+    sess.get(f"https://pan.baidu.com/share/init?surl={surl}", timeout=30)
+
+    log_fn("   验证提取码…")
+    verify = sess.post(
+        "https://pan.baidu.com/share/verify",
+        params={"surl": surl, "t": str(int(time.time() * 1000)),
+                "channel": "chunlei", "web": "1", "clienttype": "0"},
+        data={"pwd": extraction_code, "vcode": "", "vcode_str": ""},
+        timeout=30,
+    )
+    vdata = verify.json()
+    if vdata.get("errno") != 0:
+        raise RuntimeError(
+            f"提取码验证失败 (errno={vdata.get('errno')})，"
+            "请检查提取码是否正确、链接是否已失效"
+        )
+
+    randsk = vdata.get("randsk", "")
+    if randsk:
+        sess.cookies.set("BDCLND", randsk, domain=".baidu.com")
+
+    log_fn("   获取文件信息…")
+    page = sess.get(f"https://pan.baidu.com/s/1{surl}", timeout=30).text
+
+    filename = None
+    dlink = None
+    file_size = 0
+    shareid = uk = fs_id = None
+    sign = timestamp = None
+
+    fl_m = re.search(r'"file_list"\s*:\s*(\[.*?\])\s*[,}]', page)
+    if not fl_m:
+        fl_m = re.search(r'file_list["\s:=]+(\[.*?\])', page)
+    if fl_m:
+        try:
+            flist = _json.loads(fl_m.group(1))
+            if flist:
+                t = flist[0]
+                filename = t.get("server_filename", "")
+                dlink = t.get("dlink", "")
+                file_size = int(t.get("size", 0))
+                fs_id = t.get("fs_id")
+        except Exception:
+            pass
+
+    for pat in [r'"shareid"\s*:\s*(\d+)', r'shareid["\s:=]+(\d+)']:
+        sm = re.search(pat, page)
+        if sm and sm.group(1) != "0":
+            shareid = sm.group(1); break
+    for pat in [r'"share_uk"\s*:\s*"?(\d+)"?', r'"uk"\s*:\s*(\d+)',
+                r'share_uk["\s:=]+(\d+)']:
+        um = re.search(pat, page)
+        if um and um.group(1) != "0":
+            uk = um.group(1); break
+
+    sign_m = re.search(r'"sign"\s*:\s*"([^"]+)"', page)
+    if sign_m: sign = sign_m.group(1)
+    ts_m = re.search(r'"timestamp"\s*:\s*(\d+)', page)
+    if ts_m: timestamp = ts_m.group(1)
+    if not bdstoken:
+        bds_m = re.search(r'"bdstoken"\s*:\s*"([a-f0-9]+)"', page)
+        if bds_m: bdstoken = bds_m.group(1)
+
+    if shareid and uk and (not filename or not dlink):
+        log_fn("   通过 share/list API 获取文件详情…")
+        list_params = {
+            "shareid": shareid, "uk": uk, "root": "1",
+            "page": "1", "num": "100",
+            "channel": "chunlei", "web": "1", "clienttype": "0",
+        }
+        if randsk:
+            list_params["sekey"] = randsk
+        ldata = sess.get(
+            "https://pan.baidu.com/share/list",
+            params=list_params, timeout=30,
+        ).json()
+        log_fn(f"   [debug] share/list errno={ldata.get('errno')}")
+        if ldata.get("errno") == 0 and ldata.get("list"):
+            t = ldata["list"][0]
+            if not filename: filename = t.get("server_filename", "")
+            if not dlink: dlink = t.get("dlink", "")
+            if not file_size: file_size = int(t.get("size", 0))
+            if not fs_id: fs_id = t.get("fs_id")
+
+    if not filename:
+        log_fn(f"   [debug] page前500字符: {page[:500]}")
+        raise RuntimeError("无法获取文件信息，请确认链接有效")
+
+    log_fn(f"   找到文件：{filename}（{file_size // (1024*1024)} MB）")
+    log_fn(f"   [debug] dlink={'有' if dlink else '无'}, sign={'有' if sign else '无'}, "
+           f"ts={timestamp}, bdstoken={'有' if bdstoken else '无'}")
+
+    if not dlink and shareid and uk and fs_id and sign and timestamp:
+        log_fn("   通过 sharedownload API 获取下载链接…")
+        sd = sess.post(
+            "https://pan.baidu.com/api/sharedownload",
+            params={"sign": sign, "timestamp": timestamp,
+                    "channel": "chunlei", "web": "1", "clienttype": "0"},
+            data={
+                "encrypt": "0", "product": "share", "uk": uk,
+                "primaryid": shareid, "fid_list": f"[{fs_id}]",
+                "extra": _json.dumps({"sekey": randsk}) if randsk else "{}",
+            },
+            timeout=30,
+        ).json()
+        log_fn(f"   [debug] sharedownload errno={sd.get('errno')}")
+        if sd.get("errno") == 0 and sd.get("list"):
+            dlink = sd["list"][0].get("dlink", "")
+    elif not dlink:
+        missing = [x for x, v in [("sign", sign), ("timestamp", timestamp),
+                                    ("fs_id", fs_id)] if not v]
+        log_fn(f"   [debug] sharedownload 跳过，缺少: {', '.join(missing)}")
+
+    if not dlink and cookie_str and fs_id and shareid and uk:
+        log_fn("   尝试转存到网盘后获取下载链接…")
+        try:
+            tdata = sess.post(
+                "https://pan.baidu.com/share/transfer",
+                params={
+                    "shareid": shareid, "from": uk,
+                    "bdstoken": bdstoken, "ondup": "newcopy",
+                    "channel": "chunlei", "web": "1", "clienttype": "0",
+                },
+                data={"fsidlist": f"[{fs_id}]", "path": "/"},
+                timeout=30,
+            ).json()
+            t_errno = tdata.get("errno", -1)
+            log_fn(f"   [debug] transfer errno={t_errno} resp={str(tdata)[:200]}")
+
+            new_path = ""
+            if t_errno == 0 and tdata.get("extra", {}).get("list"):
+                new_path = tdata["extra"]["list"][0].get("to", "")
+            elif t_errno in (2, -33):
+                new_path = f"/{filename}"
+                log_fn(f"   文件已在网盘中，直接获取下载链接…")
+
+            if new_path:
+                paths_to_try = [new_path]
+                if not new_path.startswith("/来自分享/"):
+                    paths_to_try.append(f"/来自分享/{filename}")
+
+                for try_path in paths_to_try:
+                    log_fn(f"   [debug] 尝试 filemetas: {try_path}")
+                    mdata = sess.get(
+                        "https://pan.baidu.com/api/filemetas",
+                        params={
+                            "target": _json.dumps([try_path]),
+                            "dlink": "1", "channel": "chunlei",
+                            "web": "1", "clienttype": "0", "bdstoken": bdstoken,
+                        },
+                        timeout=30,
+                    ).json()
+                    log_fn(f"   [debug] filemetas errno={mdata.get('errno')} info={str(mdata.get('info', []))[:200]}")
+                    if mdata.get("errno") == 0 and mdata.get("info"):
+                        dlink = mdata["info"][0].get("dlink", "")
+                        if dlink:
+                            break
+
+                if not dlink:
+                    log_fn("   [debug] filemetas 失败，用 list API 搜索…")
+                    try:
+                        search_data = sess.get(
+                            "https://pan.baidu.com/rest/2.0/xpan/file",
+                            params={
+                                "method": "search",
+                                "key": filename,
+                                "recursion": "1",
+                                "web": "1",
+                            },
+                            timeout=30,
+                        ).json()
+                        log_fn(f"   [debug] search errno={search_data.get('errno')} count={len(search_data.get('list', []))}")
+                        if search_data.get("errno") == 0 and search_data.get("list"):
+                            found = search_data["list"][0]
+                            found_path = found.get("path", "")
+                            log_fn(f"   [debug] 找到文件: {found_path}")
+                            mdata2 = sess.get(
+                                "https://pan.baidu.com/api/filemetas",
+                                params={
+                                    "target": _json.dumps([found_path]),
+                                    "dlink": "1", "channel": "chunlei",
+                                    "web": "1", "clienttype": "0", "bdstoken": bdstoken,
+                                },
+                                timeout=30,
+                            ).json()
+                            log_fn(f"   [debug] filemetas2 errno={mdata2.get('errno')}")
+                            if mdata2.get("errno") == 0 and mdata2.get("info"):
+                                dlink = mdata2["info"][0].get("dlink", "")
+                    except Exception as se:
+                        log_fn(f"   [debug] search异常: {se}")
+        except Exception as te:
+            log_fn(f"   [debug] 转存异常: {te}")
+
+    if not dlink:
+        raise RuntimeError(
+            "无法获取下载链接。可能原因：\n"
+            "1. Cookie 已过期或无效\n"
+            "2. 百度账号未开通网盘或容量已满\n"
+            "请重新登录 pan.baidu.com 后重新复制 Cookie"
+        )
+
+    log_fn("   开始下载…")
+    dl = sess.get(
+        dlink, stream=True, timeout=600,
+        headers={"User-Agent": "LogStatistic"},
+    )
+    if dl.status_code != 200:
+        raise RuntimeError(f"下载请求失败 HTTP {dl.status_code}")
+
+    out_path = os.path.join(output_dir, filename)
+    total = int(dl.headers.get("content-length", 0))
+    done_bytes = 0
+    last_log_pct = -10
+
+    with open(out_path, "wb") as f:
+        for chunk in dl.iter_content(chunk_size=1024 * 1024):
+            f.write(chunk)
+            done_bytes += len(chunk)
+            if total > 0:
+                pct = done_bytes * 100 / total
+                if pct - last_log_pct >= 10:
+                    log_fn(f"   下载进度: {pct:.0f}%  "
+                           f"({done_bytes // (1024*1024)}/{total // (1024*1024)} MB)")
+                    last_log_pct = pct
+
+    stem = os.path.splitext(filename)[0]
+    log_fn(f"   下载完成 ({done_bytes // (1024*1024)} MB)")
+    return out_path, stem
+
+
+def _download_and_transcribe(task_id, video_idx, link, extraction_code, bduss_cookie):
+    """下载百度网盘视频后调用公共转录核心"""
+    task = video_tasks[task_id]
+    vinfo = task["videos"][video_idx]
+    tmpdir = tempfile.mkdtemp(prefix=f"dl_{task_id}_{video_idx}_")
+
+    def log(msg):
+        vinfo["logs"].append(msg)
+        task["global_logs"].append(f"[{video_idx + 1}] {msg}")
+
+    try:
+        vinfo["status"] = "downloading"
+        log("开始从百度网盘下载…")
+        video_path, title = _baidu_download(
+            link, extraction_code, bduss_cookie, tmpdir, log
+        )
+        vinfo["title"] = title
+        _do_transcribe(task_id, video_idx, video_path, title, source_line=link)
+
+    except Exception as e:
+        import traceback as tb
+        if vinfo["status"] != "error":
+            vinfo["status"] = "error"
+            vinfo["error"] = str(e)
+            log(f"❌ 下载失败：{e}")
+            log(tb.format_exc()[:500])
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _run_batch(task_id, worker_fn_args, max_workers=3):
+    """通用并行批处理：worker_fn_args 为 [(fn, args), ...]"""
+    task = video_tasks[task_id]
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(fn, *args) for fn, args in worker_fn_args]
+        for f in futures:
+            try: f.result()
+            except Exception as e:
+                task["global_logs"].append(f"未捕获异常：{e}")
+    task["done"] = True
+    done = sum(1 for v in task["videos"] if v["status"] == "done")
+    task["global_logs"].append(f"🎉 全部完成！{done}/{len(task['videos'])} 个成功")
+
+
+@app.route("/video/upload", methods=["POST"])
+def video_upload():
+    """接收本地视频文件（多文件），创建转录任务"""
+    files = request.files.getlist("videos")
+    valid = [(f, Path(f.filename).stem) for f in files
+             if f.filename and Path(f.filename).suffix.lower() in VIDEO_EXTS]
+
+    if not valid:
+        return jsonify({"error": f"请选择视频文件（支持 {' / '.join(VIDEO_EXTS)}）"}), 400
+
+    task_id = uuid.uuid4().hex
+    saved = []
+    for i, (f, stem) in enumerate(valid):
+        ext = Path(f.filename).suffix.lower()
+        save_path = str(UPLOAD_DIR / f"{task_id}_{i}{ext}")
+        f.save(save_path)
+        saved.append((save_path, stem))
+
+    video_tasks[task_id] = {
+        "done": False,
+        "global_logs": [f"收到 {len(saved)} 个视频文件，开始并行转录…"],
+        "videos": [
+            {"title": stem, "status": "pending", "logs": [],
+             "txt_path": None, "txt_filename": None, "error": None}
+            for _, stem in saved
+        ],
+    }
+
+    worker_fn_args = [
+        (_do_transcribe, (task_id, i, path, stem, ""))
+        for i, (path, stem) in enumerate(saved)
+    ]
+    threading.Thread(target=_run_batch, args=(task_id, worker_fn_args), daemon=True).start()
+    return jsonify({"task_id": task_id, "count": len(saved)})
+
+
+def _parse_baidu_links(raw: str):
+    """解析百度网盘链接文本，支持官方分享格式和分号分隔格式"""
+    links = re.findall(r'链接[：:]\s*(https?://\S+)', raw)
+    codes = re.findall(r'提取码[：:]\s*([a-zA-Z0-9]+)', raw)
+
+    if links:
+        links = [re.sub(r'[，。,\s]+$', '', l) for l in links]
+        if len(codes) == len(links):
+            return list(zip(links, codes))
+        else:
+            return [(l, codes[i] if i < len(codes) else "") for i, l in enumerate(links)]
+
+    result = []
+    for item in re.split(r'[;；]+', raw):
+        item = item.strip()
+        if not item or not item.startswith("http"):
+            continue
+        parts = item.split(None, 1)
+        link = parts[0]
+        code = parts[1] if len(parts) > 1 else ""
+        if not code:
+            m = re.search(r'[?&]pwd=([a-zA-Z0-9]+)', link)
+            if m:
+                code = m.group(1)
+        result.append((link, code))
+    return result
+
+
+@app.route("/video/process", methods=["POST"])
+def video_process():
+    """接收百度网盘链接文本，创建转录任务"""
+    data = request.get_json(silent=True) or {}
+    links_raw = data.get("links", "").strip()
+    bduss_cookie = data.get("bduss", "").strip()
+
+    if not links_raw:
+        return jsonify({"error": "请提供至少一个百度网盘链接"}), 400
+
+    links_data = _parse_baidu_links(links_raw)
+    if not links_data:
+        return jsonify({"error": "未识别到有效链接，请检查格式"}), 400
+
+    task_id = uuid.uuid4().hex
+    video_tasks[task_id] = {
+        "done": False,
+        "global_logs": [f"收到 {len(links_data)} 条链接，开始并行下载转录…"],
+        "videos": [
+            {"title": f"视频 {i + 1}", "status": "pending", "logs": [],
+             "txt_path": None, "txt_filename": None, "error": None}
+            for i in range(len(links_data))
+        ],
+    }
+
+    worker_fn_args = [
+        (_download_and_transcribe, (task_id, i, link, code, bduss_cookie))
+        for i, (link, code) in enumerate(links_data)
+    ]
+    threading.Thread(target=_run_batch, args=(task_id, worker_fn_args), daemon=True).start()
+    return jsonify({"task_id": task_id, "count": len(links_data)})
+
+
+@app.route("/video/status/<task_id>")
+def video_status(task_id):
+    """查询批量转录任务状态"""
+    task = video_tasks.get(task_id)
+    if not task:
+        return jsonify({"error": "任务不存在"}), 404
+
+    from_idx = int(request.args.get("from", 0))
+    return jsonify({
+        "done": task["done"],
+        "global_logs": task["global_logs"][from_idx:],
+        "videos": [
+            {
+                "title": v["title"],
+                "status": v["status"],
+                "error": v["error"],
+                "has_txt": v["txt_path"] is not None,
+                "txt_filename": v["txt_filename"],
+            }
+            for v in task["videos"]
+        ],
+    })
+
+
+@app.route("/video/download/<task_id>/<int:video_idx>")
+def video_download(task_id, video_idx):
+    """下载单个 TXT 转录文件"""
+    task = video_tasks.get(task_id)
+    if not task:
+        return "任务不存在", 404
+    videos = task["videos"]
+    if video_idx < 0 or video_idx >= len(videos):
+        return "索引无效", 404
+    v = videos[video_idx]
+    if not v.get("txt_path") or not os.path.exists(v["txt_path"]):
+        return "文件不存在或尚未完成", 404
+    return send_file(
+        v["txt_path"],
+        as_attachment=True,
+        download_name=v["txt_filename"],
+        mimetype="text/plain; charset=utf-8",
+    )
+
+
+@app.route("/video/download_all/<task_id>")
+def video_download_all(task_id):
+    """将所有转录结果打包为 ZIP 下载"""
+    task = video_tasks.get(task_id)
+    if not task:
+        return "任务不存在", 404
+
+    buf = io.BytesIO()
+    count = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for v in task["videos"]:
+            if v.get("txt_path") and os.path.exists(v["txt_path"]):
+                zf.write(v["txt_path"], v["txt_filename"])
+                count += 1
+
+    if count == 0:
+        return "暂无可下载的转录文件", 404
+
+    buf.seek(0)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name="transcriptions.zip",
+        mimetype="application/zip",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  视频加字幕：Whisper 带时间戳转录 → ASS 字幕 → ffmpeg 嵌入
+# ═══════════════════════════════════════════════════════════════
+
+def _transcribe_with_timestamps(audio_path, log_fn):
+    """用 faster-whisper 转录音频，返回 [(start, end, text), ...] 时间戳列表"""
+    log_fn("加载 Whisper 模型…")
+    model = get_whisper_model()
+    log_fn("开始语音识别（带时间戳）…")
+    segments, _ = model.transcribe(
+        audio_path, language="zh", beam_size=5, vad_filter=True,
+    )
+    result = []
+    for seg in segments:
+        text = seg.text.strip()
+        if text:
+            result.append((seg.start, seg.end, text))
+    log_fn(f"识别完成，共 {len(result)} 条字幕")
+    return result
+
+
+def _format_ass_time(seconds):
+    """将秒数转为 ASS 时间格式 H:MM:SS.cc"""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    cs = int((seconds - int(seconds)) * 100)
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def _generate_ass(segments, font_size, video_width=1920, video_height=1080):
+    """根据时间戳列表生成 ASS 字幕文件内容"""
+    header = f"""[Script Info]
+Title: Auto Generated Subtitles
+ScriptType: v4.00+
+PlayResX: {video_width}
+PlayResY: {video_height}
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,PingFang SC,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,20,20,40,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = []
+    for start, end, text in segments:
+        s = _format_ass_time(start)
+        e = _format_ass_time(end)
+        lines.append(f"Dialogue: 0,{s},{e},Default,,0,0,0,,{text}")
+
+    return header + "\n".join(lines) + "\n"
+
+
+def _get_video_resolution(video_path):
+    """用 ffprobe 获取视频分辨率"""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0:s=x",
+            video_path,
+        ]
+        r = subprocess.run(cmd, capture_output=True, timeout=30)
+        out = r.stdout.decode().strip()
+        if "x" in out:
+            w, h = out.split("x")
+            return int(w), int(h)
+    except Exception:
+        pass
+    return 1920, 1080
+
+
+def _embed_subtitles(video_path, ass_path, output_path, log_fn):
+    """将 ASS 字幕硬烧录进视频画面（任意格式均支持）"""
+    log_fn("正在将字幕烧录进画面…")
+    import shutil as _shutil, tempfile as _tempfile
+    # 复制到无特殊字符的路径，以相对路径传给 ffmpeg ass filter
+    work_dir = _tempfile.mkdtemp(prefix="ffass_")
+    _shutil.copy2(ass_path, os.path.join(work_dir, "s.ass"))
+    # 优先使用带 libass 的 ffmpeg-full
+    ffmpeg_bin = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
+    if not os.path.exists(ffmpeg_bin):
+        ffmpeg_bin = "ffmpeg"
+    try:
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", os.path.abspath(video_path),
+            "-vf", "ass=s.ass",
+            "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+            "-c:a", "copy",
+            os.path.abspath(output_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=1800, cwd=work_dir)
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")[-800:]
+            raise RuntimeError(f"ffmpeg 字幕嵌入失败:\n{stderr}")
+    finally:
+        _shutil.rmtree(work_dir, ignore_errors=True)
+    log_fn("字幕视频生成完成")
+
+
+def _do_subtitle(task_id, video_path, title, font_size_name):
+    """字幕处理核心：提取音频 → 转录 → 生成 ASS → 嵌入字幕"""
+    task = subtitle_tasks[task_id]
+    tmpdir = tempfile.mkdtemp(prefix=f"sub_{task_id}_")
+
+    def log(msg):
+        task["logs"].append(msg)
+
+    try:
+        font_size = FONT_SIZES.get(font_size_name, 24)
+
+        audio_path = os.path.join(tmpdir, "audio.wav")
+        extract_audio(video_path, audio_path, log)
+
+        segments = _transcribe_with_timestamps(audio_path, log)
+
+        video_w, video_h = _get_video_resolution(video_path)
+        ass_content = _generate_ass(segments, font_size, video_w, video_h)
+        ass_path = os.path.join(tmpdir, "subtitles.ass")
+        with open(ass_path, "w", encoding="utf-8") as f:
+            f.write(ass_content)
+
+        # 硬字幕：输出保持原格式（MP4/MOV 等均支持）
+        ext = os.path.splitext(video_path)[1] or ".mp4"
+        output_name = f"{title}_字幕{ext}"
+        output_path = str(SUBTITLE_OUT_DIR / f"{task_id}{ext}")
+        _embed_subtitles(video_path, ass_path, output_path, log)
+
+        task["output_path"] = output_path
+        task["output_name"] = output_name
+        task["success"] = True
+        log(f"全部完成！可下载: {output_name}")
+
+    except Exception as e:
+        import traceback as tb
+        task["success"] = False
+        task["error"] = str(e)
+        log(f"❌ 处理失败：{e}")
+        log(tb.format_exc()[:500])
+
+    finally:
+        task["done"] = True
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        try:
+            os.remove(video_path)
+        except Exception:
+            pass
+
+
+@app.route("/subtitle/upload", methods=["POST"])
+def subtitle_upload():
+    """接收视频文件和字体大小，创建字幕任务"""
+    f = request.files.get("video")
+    if not f or not f.filename:
+        return jsonify({"error": "请选择视频文件"}), 400
+
+    ext = Path(f.filename).suffix.lower()
+    if ext not in VIDEO_EXTS:
+        return jsonify({"error": f"不支持的格式 {ext}"}), 400
+
+    font_size = request.form.get("font_size", "medium")
+    if font_size not in FONT_SIZES:
+        font_size = "medium"
+
+    task_id = uuid.uuid4().hex
+    save_path = str(UPLOAD_DIR / f"{task_id}{ext}")
+    f.save(save_path)
+    title = Path(f.filename).stem
+
+    subtitle_tasks[task_id] = {
+        "done": False,
+        "success": False,
+        "logs": [f"收到视频: {f.filename}，字体大小: {font_size}"],
+        "output_path": None,
+        "output_name": None,
+        "error": None,
+    }
+
+    threading.Thread(
+        target=_do_subtitle,
+        args=(task_id, save_path, title, font_size),
+        daemon=True,
+    ).start()
+    return jsonify({"task_id": task_id})
+
+
+@app.route("/subtitle/status/<task_id>")
+def subtitle_status(task_id):
+    """查询字幕任务状态"""
+    task = subtitle_tasks.get(task_id)
+    if not task:
+        return jsonify({"error": "任务不存在"}), 404
+    from_idx = int(request.args.get("from", 0))
+    return jsonify({
+        "done": task["done"],
+        "success": task["success"],
+        "logs": task["logs"][from_idx:],
+        "output_name": task["output_name"],
+        "error": task["error"],
+    })
+
+
+@app.route("/subtitle/download/<task_id>")
+def subtitle_download(task_id):
+    """下载带字幕的视频"""
+    task = subtitle_tasks.get(task_id)
+    if not task:
+        return "任务不存在", 404
+    if not task.get("output_path") or not os.path.exists(task["output_path"]):
+        return "文件不存在或尚未完成", 404
+    return send_file(
+        task["output_path"],
+        as_attachment=True,
+        download_name=task["output_name"],
+    )
+
+
+
     print("🚀 启动服务：http://127.0.0.1:5000")
     # 启动 Flask 应用，监听所有网络接口
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5001))
+    app.run(debug=False, host="0.0.0.0", port=port)
